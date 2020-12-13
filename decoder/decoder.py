@@ -28,7 +28,7 @@ import matplotlib as mpl
 
 
 #path to binary file
-path = "daq-test.dat"
+path = "daq-test1.dat"
 #open binary file as read only mode
 file = open(path,"rb")
 #get file size which should be multiples of data_unit
@@ -75,12 +75,12 @@ while not file.tell() == file_size:
         #要素数13で、1 byteごとに格納
         data_flagment = file.read(data_unit)
         readed_size += data_unit
-        print("file.tell(): "+str(file.tell()))
+        #print("file.tell(): "+str(file.tell()))
         
         #上位2 byte分で比較
         if data_flagment[:2] == header:
-            #下位4 byte分が欲しい
-            spillcount_data = np.append(spillcount_data,int.from_bytes(data_flagment[9:],"big"))
+            #下位2 byte分が欲しい
+            spillcount_data = np.append(spillcount_data,int.from_bytes(data_flagment[11:],"big"))
         
         #下位4 byte分で比較
         elif data_flagment[9:] == footer:
@@ -92,7 +92,7 @@ while not file.tell() == file_size:
             #下位27 bit分が欲しいから、下位32 bit(4 byte)分をとり、その中の上位5 bit分を捨てるため、上位5 bitが0で下位27 bitが1の2^27-1と&
             tdc_data = np.append(tdc_data,int.from_bytes(data_flagment[9:],"big")&(pow(2,27)-1))
             #上位77 bit分が欲しいから、上位80 bit(10 byte)分をとり、その中の下位3 bit分を捨てるため右シフト
-            sig_data = np.append(sig_data,int.from_bytes(data_flagment[10:],"big")>>3)
+            sig_data = np.append(sig_data,int.from_bytes(data_flagment[:10],"big")>>3)
             eventnum += 1
         
     eventnum_data = np.append(eventnum_data,eventnum)
@@ -168,7 +168,7 @@ plt.ylabel("Entry")
 plt.hist(np.diff(tdc_data[np.sum(eventnum_data[:i])-1:np.sum(eventnum_data[:i])-1+eventnum_data[i]],n=1))
 """
 
-
+"""
 #i=2番目のスピルについて、チャンネルごとのヒット数
 i=2
 plt.title("Channel Hits")
@@ -180,12 +180,13 @@ sig_data_uint64 = sig_data[np.sum(eventnum_data[:i])-1:np.sum(eventnum_data[:i])
 hit_ch = np.empty(0,dtype=np.int8)
 #all_ch桁目のフラグが立っていれば+1
 for n in range(1,all_ch+1):
-    #n番目のフラグの立っているchannelがあるイベントの、インデックスのリストを取得
+    #n番目のフラグの立っているchannelがあるイベントの、インデックスの一覧を取得
     hit_list = np.where(((sig_data_uint64)&(1<<(n-1)))==(1<<(n-1)))
     #n番目のchannelにはhit_list個のヒットがあるため、hit_listの要素数を加算
-    hit_ch = np.append(hit_ch,hit_ch.size)
+    hit_ch = np.append(hit_ch,hit_list[0].size)
 #全部でall_ch
 plt.scatter(np.arange(all_ch), hit_ch)
+"""
 
 """
 #you can use hex binary as str
