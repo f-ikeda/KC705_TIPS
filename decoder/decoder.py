@@ -8,6 +8,7 @@ Created on Tue Dec  8 01:12:35 2020
 """
 #TODO
 データの型は問題ないか、特にsig_dataに関して
+CHを見やすくする！
 高速化
 """
 """
@@ -29,13 +30,12 @@ import matplotlib as mpl
 
 
 #path to binary file
-path = "daq-test1.dat"
+path = "/Users/f-ikeda/EXdata/KC705/allCHwithout0CH.data"
 #open binary file as read only mode
 file = open(path,"rb")
 #get file size which should be multiples of data_unit
 file_size = os.path.getsize(path)
 print("file_size: "+str(file_size))
-print("file.tell(): "+str(file.tell()))
 #size of file which already read
 readed_size = 0
 #data unit of KC705 in terms of byte
@@ -58,6 +58,9 @@ sig_data = np.empty(0,dtype=np.int64)
 tdc_data = np.empty(0,dtype=np.int32)
 #initialization of event number data
 eventnum_data = np.empty(0,dtype=np.int64)
+
+#最初の13 byteを読み飛ばす
+a = file.read(data_unit)
 
 while not file.tell() == file_size:
     
@@ -165,7 +168,7 @@ plt.ylabel("Entry")
 plt.hist(np.diff(tdc_data[np.sum(eventnum_data[:i]):np.sum(eventnum_data[:i])-1+eventnum_data[i]],n=1))
 """
 
-
+"""
 #i=2番目のスピルについて、チャンネルごとのヒット数
 i=2
 plt.title("Channel Hits")
@@ -182,8 +185,70 @@ for n in range(1,all_ch+1):
     #n番目のchannelにはhit_list個のヒットがあるため、hit_listの要素数を加算
     hitch_data = np.append(hitch_data,hit_list[0].size)
 #全部でall_ch
-plt.scatter(np.arange(all_ch), hitch_data)
+#plt.scatter(np.arange(all_ch), hitch_data)
+#ヒットのあったCH一覧
+#print(np.nonzero(hitch_data))
+"""
 
+#i=2番目のスピルについて、チャンネルごとのヒット数
+i=4
+plt.title("Channel Hits")
+plt.xlabel("Channel Number (FMA_LAXX)")
+plt.ylabel("Entry")
+#i番目のスピルに属するsig_dataの配列、ビットシフトを行うために十分な型に変更
+sig_data_spilli_uint64 = sig_data[np.sum(eventnum_data[:i])-1:np.sum(eventnum_data[:i])-1+eventnum_data[i]].astype(np.uint64)
+#0 CHからall_ch CHのサイズで、順に、ヒット数のつまった配列、その初期化
+hitch_data = np.empty(0,dtype=np.int8)
+#all_ch桁目のフラグが立っているかを知る
+for n in range(1,all_ch+1):
+    #i番目のスピルに属するsig_dataのうち、
+    #n桁目にフラグの立っている要素の、インデックスの一覧を取得
+    hit_list = np.where(((sig_data_spilli_uint64)&(1<<(n-1)))==(1<<(n-1)))
+    #n-1番目のchannel(n=1のときには0 CHにヒットがあるか判定している)にはhit_list個のヒットがあるため
+    #hit_listの要素数を加算(インデックス0から詰めはじめる)
+    #(つまり、インデックス0番目の要素は0 CHにヒットした個数と、対応する)
+    hitch_data = np.append(hitch_data,hit_list[0].size)
+#全部でall_ch
+#plt.scatter(np.arange(all_ch), hitch_data)
+#ヒットのあったCH一覧
+#print(np.nonzero(hitch_data))
+#ヒットのあったCH一覧(FMA_HPC, J1用に直したもの)
+print((np.where(hitch_data-32>0)[0]-45))
+plt.scatter(np.arange(18), np.roll(hitch_data,32)[:18])
+plt.xticks(np.arange(18))
+
+
+"""
+#i=2番目のスピルについて、k=1 CH(0始まり)のTDCの値
+i=2
+plt.title("No.n Channel Hits")
+plt.xlabel("Clock Count")
+plt.ylabel("Entry")
+#i番目のスピルに属するsig_dataの配列、ビットシフトを行うために十分な型に変更
+sig_data_spilli_uint64 = sig_data[np.sum(eventnum_data[:i])-1:np.sum(eventnum_data[:i])-1+eventnum_data[i]].astype(np.uint64)
+#0 CHからall_ch CHのサイズで、順に、ヒット数のつまった配列、その初期化
+
+#HPCは45 CHから始まる(1始まりで)
+#つまり、0始まりで44を足せば良い
+#HPCの最初のチャンネルは、0始まりで44ということ
+k=1+44
+#i番目のスピルに属するsig_dataのうち、
+#n=k+1桁目(k CH(0始まり)に対応)にフラグの立っている要素の、インデックスの一覧を取得
+#k CHを見たいなら、n = k + 1
+n = k+1
+hit_list = np.where(((sig_data_spilli_uint64)&(1<<(n-1)))==(1<<(n-1)))
+
+#i番目のスピルに属するTDCのデータ
+tdc_data_spilli = tdc_data[np.sum(eventnum_data[:i])-1:np.sum(eventnum_data[:i])-1+eventnum_data[i]]
+#そのうち、k CHにヒットがある、TDCのデータ
+tdc_data_spilli_chk = np.empty(0,dtype=np.int8)
+for j in hit_list[0]:
+    tdc_data_spilli_chk = np.append(tdc_data_spilli_chk,tdc_data_spilli[j])
+#spill i に属するch kにヒットのある、TDCのデータ
+#plt.hist(tdc_data_spilli_chk)
+#間隔なら、
+plt.hist(np.diff(tdc_data_spilli_chk[1:],n=1))
+"""
 
 """
 #you can use hex binary as str
