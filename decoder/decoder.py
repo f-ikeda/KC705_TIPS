@@ -7,6 +7,7 @@ Created on Tue Dec  8 01:12:35 2020
 """
 """
 #TODO
+データの型は問題ないか、特にsig_dataに関して
 高速化
 """
 """
@@ -40,28 +41,23 @@ readed_size = 0
 #data unit of KC705 in terms of byte
 data_unit = 13
 
-#header as str
-#header = "abb000123456701234567"
-#footer as str
-#footer = "0fee00aaaaaaaaaaaaaaaa"
-
-#header as str
-header = "abb0"
+#header as str (10 byte)
+header = "abb00012345670123456"
 header = bytes.fromhex(header)
-#footer as str
-footer = "aaaaaaaa"
+#footer as str (11 byte)
+footer = "0fee00aaaaaaaaaaaaaaaa"
 footer = bytes.fromhex(footer)
 
 #initialization of a header data
 spillcount_data = np.empty(0,dtype=np.int8)
 #initialization of a footer data
 eventmatching_data = np.empty(0,dtype=np.int8)
-#initialization of tdc data
-tdc_data = np.empty(0,dtype=np.int8)
 #initialization of sig data
-sig_data = np.empty(0,dtype=np.int16)
+sig_data = np.empty(0,dtype=np.int64)
+#initialization of tdc data
+tdc_data = np.empty(0,dtype=np.int32)
 #initialization of event number data
-eventnum_data = np.empty(0,dtype=np.int8)
+eventnum_data = np.empty(0,dtype=np.int64)
 
 while not file.tell() == file_size:
     
@@ -77,22 +73,23 @@ while not file.tell() == file_size:
         readed_size += data_unit
         #print("file.tell(): "+str(file.tell()))
         
-        #上位2 byte分で比較
-        if data_flagment[:2] == header:
+        #上位10 byte分で比較
+        if data_flagment[:len(header)] == header:
             #下位2 byte分が欲しい
             spillcount_data = np.append(spillcount_data,int.from_bytes(data_flagment[11:],"big"))
         
-        #下位4 byte分で比較
-        elif data_flagment[9:] == footer:
+        #下位11 byte分で比較
+        elif data_flagment[-len(footer):] == footer:
             #上位2 byte分が欲しい
             eventmatching_data = np.append(eventmatching_data,int.from_bytes(data_flagment[:2],"big"))
             footer_flag = 1
          
         else:
-            #下位27 bit分が欲しいから、下位32 bit(4 byte)分をとり、その中の上位5 bit分を捨てるため、上位5 bitが0で下位27 bitが1の2^27-1と&
-            tdc_data = np.append(tdc_data,int.from_bytes(data_flagment[9:],"big")&(pow(2,27)-1))
             #上位77 bit分が欲しいから、上位80 bit(10 byte)分をとり、その中の下位3 bit分を捨てるため右シフト
             sig_data = np.append(sig_data,int.from_bytes(data_flagment[:10],"big")>>3)
+            #下位27 bit分が欲しいから、下位32 bit(4 byte)分をとり、その中の上位5 bit分を捨てるため、上位5 bitが0で下位27 bitが1の2^27-1と&
+            tdc_data = np.append(tdc_data,int.from_bytes(data_flagment[9:],"big")&(pow(2,27)-1))
+
             eventnum += 1
         
     eventnum_data = np.append(eventnum_data,eventnum)
@@ -165,10 +162,10 @@ i=2
 plt.title("TDC diff")
 plt.xlabel("Clock Counts")
 plt.ylabel("Entry")
-plt.hist(np.diff(tdc_data[np.sum(eventnum_data[:i])-1:np.sum(eventnum_data[:i])-1+eventnum_data[i]],n=1))
+plt.hist(np.diff(tdc_data[np.sum(eventnum_data[:i]):np.sum(eventnum_data[:i])-1+eventnum_data[i]],n=1))
 """
 
-"""
+
 #i=2番目のスピルについて、チャンネルごとのヒット数
 i=2
 plt.title("Channel Hits")
@@ -177,16 +174,16 @@ plt.ylabel("Entry")
 #ビットシフトを行うために十分な型に変更
 sig_data_uint64 = sig_data[np.sum(eventnum_data[:i])-1:np.sum(eventnum_data[:i])-1+eventnum_data[i]].astype(np.uint64)
 #all_chの、ヒット数のつまった配列、その初期化
-hit_ch = np.empty(0,dtype=np.int8)
+hitch_data = np.empty(0,dtype=np.int8)
 #all_ch桁目のフラグが立っていれば+1
 for n in range(1,all_ch+1):
     #n番目のフラグの立っているchannelがあるイベントの、インデックスの一覧を取得
     hit_list = np.where(((sig_data_uint64)&(1<<(n-1)))==(1<<(n-1)))
     #n番目のchannelにはhit_list個のヒットがあるため、hit_listの要素数を加算
-    hit_ch = np.append(hit_ch,hit_list[0].size)
+    hitch_data = np.append(hitch_data,hit_list[0].size)
 #全部でall_ch
-plt.scatter(np.arange(all_ch), hit_ch)
-"""
+plt.scatter(np.arange(all_ch), hitch_data)
+
 
 """
 #you can use hex binary as str
