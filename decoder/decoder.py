@@ -18,6 +18,8 @@ eventmatching_data: ndarray, イベントマッチングの値(int)のつまっ�
 tdc_data: ndarray, TDCの値(int)のつまった配列
 sig_data: ndarray, SIGの値(int)のつまった配列
 eventnum_data: ndarray, スピルごとのTDCした回数(int)のつまった配列
+
+i,nともに0始まりであることに注意！
 """
 
 
@@ -26,11 +28,62 @@ import numpy as np
 
 #for debug
 import matplotlib.pyplot as plt
-import matplotlib as mpl
+
+
+def data_in_spill_i(data,eventnum_data,i):
+    #input: data = tdc_data or sig_data, i
+    #output: tdc_data or sig_dataのうち、i番目のスピルに属するものだけを取り出した部分列ndarray
+    #i番目のスピルに属するtdc_data or sig_dataの要素数: eventnum_data[i]
+    #i番目まで(i番目含む)のスピルに属するtdc_data or sig_dataの要素数: np.sum(eventnum_data[:i+1])
+    
+    #tdc_data = [1,2,|4,3,5,|1,4,3,3|2,1]
+    #eventnum_data = [2,3,4,2]
+    #このとき、2番目のスピルに属するtdc_dataの値は4個(1,4,3,3)
+    #初めの値1と終わりの値3を指定するインデックスは、
+    #初めの値1について、eventnum_data[0]+eventnum_data[1]=2+3=5
+    #終わりの値3について、eventnum_data[0]+eventnum_data[1]+eventnum_data[2]-1=2+3+4-1=9-1(=8)
+    
+    return data[np.sum(eventnum_data[:i]):np.sum(eventnum_data[:i+1])]
+
+def hitlist_data_in_spill_i_ch_n(sig_data,eventnum_data,i,n):
+    #input: sig_data, i, n
+    #output: i番目のスピルに属するsig_dataのうち、n番目のCHにヒットのある要素のインデックス一覧
+    #i番目のスピルに属するsig_dataの部分列を、ビットシフトを行うために十分な型に変更
+    sig_data_in_spill_i_uint64 = data_in_spill_i(sig_data,eventnum_data,i).astype(np.uint64)
+    #i番目のスピルに属するsig_dataの部分列のうち、n桁目のフラグが立っている要素のインデックスを取得
+    #n桁目のフラグだけ立っているビット: 1<<(n-1)
+    #n桁目のフラグが立っているか: if bit & (1<<(n-1)):
+    #0番目のchについては1桁目を、n番目のchについてはn+1桁目を見る必要がある
+    output = np.where(((sig_data_in_spill_i_uint64)&(1<<(n+1-1)))==(1<<(n+1-1)))
+    
+    return output[0]
+
+def hittimes_data_in_spill_i(sig_data,eventnum_data,i):
+    #input: sig_data, eventnum_data, i
+    #output: i番目のスピルに関して、インデックスnにn番目のCHへのヒット数が格納されたndarray
+    #outputとなるndarray
+    output = np.empty(0,dtype=np.int8)
+    for n in range(0,all_ch):
+        #i番目のスピルに属するデータのうち、n番目のCHにはhitlist_data_in_spill_i_ch_nの全要素数個のヒットがあるためappend
+        #(インデックス0番目の要素は、0 CHにヒットした個数となる)
+        output = np.append(output,hitlist_data_in_spill_i_ch_n(sig_data,eventnum_data,i,n).size)
+        
+    return output
+
+def tdcdata_in_spill_i_ch_n(tdc_data,sig_data,eventnum_data,i,n):
+    #input: tdc_data, sig_data, eventnum_data, i, n
+    #output: i番目のスピルに属するtdc_dataの部分列のうち、n番目のCHへのヒットがあったものだけを取り出した部分列ndarray
+    output = np.empty(0,dtype=np.int8)
+        #i番目のスピルに属するsig_dataのうち、n番目のCHにヒットのある要素のインデックス一覧
+        #i番目のスピルに属するtdc_dataのうち、このインデックスで指定される要素が、output
+    for k in hitlist_data_in_spill_i_ch_n(sig_data,eventnum_data,i,n):
+        output = np.append(output,data_in_spill_i(tdc_data,eventnum_data,i)[k])
+    
+    return output
 
 
 #path to binary file
-path = "/Users/f-ikeda/EXdata/KC705/allCHwithout0CH.data"
+path = "/Users/f-ikeda/EXdata/KC705/chain_gray_cable.data"
 #open binary file as read only mode
 file = open(path,"rb")
 #get file size which should be multiples of data_unit
@@ -40,6 +93,11 @@ print("file_size: "+str(file_size))
 readed_size = 0
 #data unit of KC705 in terms of byte
 data_unit = 13
+
+#1 clock needs 5 ns
+clock_time = 5e-9
+#all 77 channels
+all_ch = 77
 
 #header as str (10 byte)
 header = "abb00012345670123456"
@@ -60,7 +118,7 @@ tdc_data = np.empty(0,dtype=np.int32)
 eventnum_data = np.empty(0,dtype=np.int64)
 
 #最初の13 byteを読み飛ばす
-a = file.read(data_unit)
+#a = file.read(data_unit)
 
 while not file.tell() == file_size:
     
@@ -74,7 +132,7 @@ while not file.tell() == file_size:
         #要素数13で、1 byteごとに格納
         data_flagment = file.read(data_unit)
         readed_size += data_unit
-        #print("file.tell(): "+str(file.tell()))
+        print("file.tell(): "+str(file.tell()))
         
         #上位10 byte分で比較
         if data_flagment[:len(header)] == header:
@@ -86,6 +144,9 @@ while not file.tell() == file_size:
             #上位2 byte分が欲しい
             eventmatching_data = np.append(eventmatching_data,int.from_bytes(data_flagment[:2],"big"))
             footer_flag = 1
+            
+            #フッターの抜けや、ファイルサイズが13バイトの倍数じゃないとき
+            #break
          
         else:
             #上位77 bit分が欲しいから、上位80 bit(10 byte)分をとり、その中の下位3 bit分を捨てるため右シフト
@@ -96,8 +157,9 @@ while not file.tell() == file_size:
             eventnum += 1
         
     eventnum_data = np.append(eventnum_data,eventnum)
-         
-    #print(str(spillcount_data.size)+":"+str(eventmatching_data.size)+":"+str(tdc_data.size))
+    
+    #フッターの抜けや、ファイルサイズが13バイトの倍数じゃないとき
+    #break
     
     #data format
     #each of data is 13 byte(104 bit)
@@ -114,6 +176,9 @@ while not file.tell() == file_size:
     
     #about TDC data
     #77 bit: SIG
+        #64 bit: MainHodo
+        #12 bit: PMT
+        #1 bit: MR_Sync
     #27 bit: COUNTER
     
     #about footer
@@ -131,16 +196,7 @@ file.close()
 
 """
 #解析コードは以下に書く
-i番目のスピルに属するTDCのデータ数: eventnum_data[i]
-i-1番目までのスピルに属するTDCのデータ数: np.sum(eventnum_data[:i])
-i番目のスピルに属するTDCのデータ: tdc_data[np.sum(eventnum_data[:i])-1:np.sum(eventnum_data[:i])-1+eventnum_data[i]]
-n番目のフラグだけ立っているビット: 1<<(n-1)
-n番目のフラグが立っているか: if bit & (1<<(n-1)):
 """
-#1 clock needs 5 ns
-clock_time = 5e-9
-#all 77 channels
-all_ch = 77
 
 """
 #スピルごとのイベント数
@@ -148,7 +204,7 @@ plt.title("Events Number")
 plt.xlabel("Spill Number")
 plt.ylabel("Entry")
 plt.scatter(spillcount_data,eventnum_data)
-"""
+#"""
 
 """
 #i=2番目のスピルについて、TDCのクロックの値
@@ -156,8 +212,8 @@ i=2
 plt.title("TDC Values")
 plt.xlabel("Clock Counts")
 plt.ylabel("Entry")
-plt.hist(tdc_data[np.sum(eventnum_data[:i])-1:np.sum(eventnum_data[:i])-1+eventnum_data[i]])
-"""
+plt.hist(data_in_spill_i(tdc_data,eventnum_data,i))
+#"""
 
 """
 #i=2番目のスピルについて、TDCのクロックの値の間隔
@@ -165,8 +221,22 @@ i=2
 plt.title("TDC diff")
 plt.xlabel("Clock Counts")
 plt.ylabel("Entry")
-plt.hist(np.diff(tdc_data[np.sum(eventnum_data[:i]):np.sum(eventnum_data[:i])-1+eventnum_data[i]],n=1))
+edges = np.arange(np.diff(data_in_spill_i(tdc_data,eventnum_data,i),n=1).min(),np.diff(data_in_spill_i(tdc_data,eventnum_data,i),n=1).max())
+plt.hist(np.diff(data_in_spill_i(tdc_data,eventnum_data,i),n=1),bins=edges,histtype="step",log=True)
+#"""
+
 """
+#全てのスピルについて、TDCのクロックの値の間隔
+plt.title("TDC diff")
+plt.xlabel("Clock Counts")
+plt.ylabel("Entry")
+y = np.empty(0,dtype=np.int32)
+#スピルの数は全部でspillcount_dataの要素数個
+for i in range(spillcount_data.size):
+    y = np.append(y,np.diff(data_in_spill_i(tdc_data,eventnum_data,i),n=1))
+edges = np.arange(y.min(),y.max())
+plt.hist(y,bins=edges,histtype="step",log=True)
+#"""
 
 """
 #i=2番目のスピルについて、チャンネルごとのヒット数
@@ -174,81 +244,62 @@ i=2
 plt.title("Channel Hits")
 plt.xlabel("Channel Number")
 plt.ylabel("Entry")
-#ビットシフトを行うために十分な型に変更
-sig_data_uint64 = sig_data[np.sum(eventnum_data[:i])-1:np.sum(eventnum_data[:i])-1+eventnum_data[i]].astype(np.uint64)
-#all_chの、ヒット数のつまった配列、その初期化
-hitch_data = np.empty(0,dtype=np.int8)
-#all_ch桁目のフラグが立っていれば+1
-for n in range(1,all_ch+1):
-    #n番目のフラグの立っているchannelがあるイベントの、インデックスの一覧を取得
-    hit_list = np.where(((sig_data_uint64)&(1<<(n-1)))==(1<<(n-1)))
-    #n番目のchannelにはhit_list個のヒットがあるため、hit_listの要素数を加算
-    hitch_data = np.append(hitch_data,hit_list[0].size)
 #全部でall_ch
-#plt.scatter(np.arange(all_ch), hitch_data)
+plt.scatter(np.arange(all_ch),hittimes_data_in_spill_i(sig_data,eventnum_data,i))
 #ヒットのあったCH一覧
-#print(np.nonzero(hitch_data))
-"""
+print(np.nonzero(hittimes_data_in_spill_i(sig_data,eventnum_data,i)))
+#"""
 
-#i=2番目のスピルについて、チャンネルごとのヒット数
-i=4
-plt.title("Channel Hits")
-plt.xlabel("Channel Number (FMA_LAXX)")
+"""
+#全てのスピルについて、チャンネルごとのヒット数の合計
+plt.title("Total Channel Hits")
+plt.xlabel("Channel Number")
 plt.ylabel("Entry")
-#i番目のスピルに属するsig_dataの配列、ビットシフトを行うために十分な型に変更
-sig_data_spilli_uint64 = sig_data[np.sum(eventnum_data[:i])-1:np.sum(eventnum_data[:i])-1+eventnum_data[i]].astype(np.uint64)
-#0 CHからall_ch CHのサイズで、順に、ヒット数のつまった配列、その初期化
-hitch_data = np.empty(0,dtype=np.int8)
-#all_ch桁目のフラグが立っているかを知る
-for n in range(1,all_ch+1):
-    #i番目のスピルに属するsig_dataのうち、
-    #n桁目にフラグの立っている要素の、インデックスの一覧を取得
-    hit_list = np.where(((sig_data_spilli_uint64)&(1<<(n-1)))==(1<<(n-1)))
-    #n-1番目のchannel(n=1のときには0 CHにヒットがあるか判定している)にはhit_list個のヒットがあるため
-    #hit_listの要素数を加算(インデックス0から詰めはじめる)
-    #(つまり、インデックス0番目の要素は0 CHにヒットした個数と、対応する)
-    hitch_data = np.append(hitch_data,hit_list[0].size)
+y = np.zeros(all_ch)
+#スピルの数は全部でspillcount_dataの要素数個
+for i in range(spillcount_data.size):
+    y += hittimes_data_in_spill_i(sig_data,eventnum_data,i)
+    
 #全部でall_ch
-#plt.scatter(np.arange(all_ch), hitch_data)
+plt.scatter(np.arange(all_ch),y)
 #ヒットのあったCH一覧
-#print(np.nonzero(hitch_data))
+print(np.nonzero(y))
+#"""
+
+"""
 #ヒットのあったCH一覧(FMA_HPC, J1用に直したもの)
 print((np.where(hitch_data-32>0)[0]-45))
-plt.scatter(np.arange(18), np.roll(hitch_data,32)[:18])
+#plt.scatter(np.arange(18), np.roll(hitch_data,32)[:18])
+#logで見て出ない、他はないということ
+plt.scatter(np.arange(18), np.log(np.roll(hitch_data,32)[:18]))
 plt.xticks(np.arange(18))
-
+#"""
 
 """
-#i=2番目のスピルについて、k=1 CH(0始まり)のTDCの値
+#i=2番目のスピル、n=45 CHについて、TDCのクロックの値の間隔
 i=2
+n=45
 plt.title("No.n Channel Hits")
 plt.xlabel("Clock Count")
 plt.ylabel("Entry")
-#i番目のスピルに属するsig_dataの配列、ビットシフトを行うために十分な型に変更
-sig_data_spilli_uint64 = sig_data[np.sum(eventnum_data[:i])-1:np.sum(eventnum_data[:i])-1+eventnum_data[i]].astype(np.uint64)
-#0 CHからall_ch CHのサイズで、順に、ヒット数のつまった配列、その初期化
-
-#HPCは45 CHから始まる(1始まりで)
-#つまり、0始まりで44を足せば良い
-#HPCの最初のチャンネルは、0始まりで44ということ
-k=1+44
-#i番目のスピルに属するsig_dataのうち、
-#n=k+1桁目(k CH(0始まり)に対応)にフラグの立っている要素の、インデックスの一覧を取得
-#k CHを見たいなら、n = k + 1
-n = k+1
-hit_list = np.where(((sig_data_spilli_uint64)&(1<<(n-1)))==(1<<(n-1)))
-
-#i番目のスピルに属するTDCのデータ
-tdc_data_spilli = tdc_data[np.sum(eventnum_data[:i])-1:np.sum(eventnum_data[:i])-1+eventnum_data[i]]
-#そのうち、k CHにヒットがある、TDCのデータ
-tdc_data_spilli_chk = np.empty(0,dtype=np.int8)
-for j in hit_list[0]:
-    tdc_data_spilli_chk = np.append(tdc_data_spilli_chk,tdc_data_spilli[j])
-#spill i に属するch kにヒットのある、TDCのデータ
-#plt.hist(tdc_data_spilli_chk)
+#plt.hist(tdcdata_in_spill_i_ch_n(tdc_data,sig_data,eventnum_data,i,n))
 #間隔なら、
-plt.hist(np.diff(tdc_data_spilli_chk[1:],n=1))
+plt.hist(np.diff(tdcdata_in_spill_i_ch_n(tdc_data,sig_data,eventnum_data,i,n),n=1))
+#"""
+
 """
+#全てのスピル、n=45 CHについて、TDCのクロックの値の間隔
+n=45
+plt.title("No.n Channel Hits")
+plt.xlabel("Clock Count")
+plt.ylabel("Entry")
+y = np.empty(0,dtype=np.int32)
+#スピルの数は全部でspillcount_dataの要素数個
+for i in range(spillcount_data.size):
+    y = np.append(y,np.diff(tdcdata_in_spill_i_ch_n(tdc_data,sig_data,eventnum_data,i,n),n=1))
+edges = np.arange(y.min(),y.max())
+plt.hist(y,bins=edges,histtype="step",log=True)
+#"""
 
 """
 #you can use hex binary as str
