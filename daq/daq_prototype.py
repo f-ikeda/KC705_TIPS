@@ -12,6 +12,7 @@ Ctrl+C押されたときの、データの保存の処理を要チェック
 """
 
 import time
+import threading
 
 from sitcpy.rbcp import Rbcp
 import socket
@@ -20,7 +21,7 @@ import numpy as np
 
 class Client(object):
     
-    def __init__(self, ip_address="192.168.10.16", tcp_port=24, data_unit=13, savedata_path=""):
+    def __init__(self, ip_address="192.168.10.16", tcp_port=24, data_unit=13, savedata_path="hello"):
         self._ip_address = ip_address
         self._tcp_port = tcp_port
         #unit in bytes
@@ -53,7 +54,7 @@ class Client(object):
         #initialization of spill number
         self._spillnum = 0
         #how many spills in a file
-        self._spillmax = 300
+        self._spillmax = 10
         
     def connect(self):
         print("Starting connect()..")
@@ -111,7 +112,12 @@ class Client(object):
     def save(self):
         print("Starting save()..")
         #保存するファイルの名前の変更はここで行う
-        #self._savedata_path += str(hoge)などとして
+        #self._savedata_path += str(time.time())などとして
+        
+        #このままでは、呼び出されたらすぐに保存してしまう
+        #ここに、保存するための条件(self._tdc_dataがたまったら？とか)を記述すること
+        #少なくとも、変に中途半端なファイルで保存しないための処理が必要
+        
         #save the all numpy arrays as a npz
         np.savez(self._savedata_path,self._spillcount_data,self._eventmatching_data,self._sig_data,self._tdc_data,self._eventnum_data)
         
@@ -122,13 +128,27 @@ class Client(object):
         self._tdc_data = np.empty(0,dtype=np.int32)
         self._eventnum_data = np.empty(0,dtype=np.int64)
         print("Finished save()!")
+        
+    def scheduler(interval, function, wait = True):
+        #interval [s]
+        #wait = Falseとすることで、前のスレッドの残存を気にせず、定期的に実行可能
+        #https://qiita.com/montblanc18/items/05715730d99d450fd0d3
+        base_time = time.time()
+        next_time = 0
+        while True:
+            t = threading.Thread(target = function)
+            t.start()
+            if wait:
+                t.join()
+                next_time = ((base_time - time.time()) % interval) or interval
+                time.sleep(next_time)
     
     def reset(self):
         print("Starting reset()..")
         #reset KC705
-        self._rbcp.write(0x02,"1")
+        self._rbcp.write(0x02,b"\x01")
         time.sleep(0.01)
-        self._rbcp.write(0x02,"0")
+        self._rbcp.write(0x02,b"\x00")
         time.sleep(0.01)
     
         print("Finished reset()!")
@@ -136,7 +156,7 @@ class Client(object):
     def start(self):
         print("Starting start()..")
         #make KC705 to start transfering data
-        self._rbcp.write(0x01,"1")
+        self._rbcp.write(0x01,b"\x01")
         
         print("Finished start()!")
         
@@ -144,7 +164,7 @@ class Client(object):
         print("Starting stop()..")
         #make KC705 to stop transfering data
         time.sleep(3)
-        self._rbcp.write(0x01,"0")
+        self._rbcp.write(0x01,b"\x00")
         
         print("Finished stop()!")
         
@@ -167,12 +187,15 @@ class Client(object):
         #recieve data until Ctrl-C comes
         except KeyboardInterrupt:
             self.stop()
+            time.sleep(5)
             self.save()
             
         print("Finished recieve()!")
 
 if __name__ == '__main__':
     client = Client()
+    
+    #client.scheduler(5,client.save,False)
     
     client.connect()
     
