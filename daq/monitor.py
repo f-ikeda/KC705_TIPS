@@ -1,4 +1,5 @@
 import sys
+import struct
 
 import numpy as np
 
@@ -21,10 +22,10 @@ BITS_SIZE_SIG_NEWHOD = 64
 BITS_SIZE_TDC = 27
 # bits
 
-BITS_MASK_SIG = 2 ** BITS_SIZE_SIG - 1
-# a sequence of BITS_SIZE_SIG 1s
+BITS_MASK_SIG = (2 ** BITS_SIZE_SIG - 1) << BITS_SIZE_TDC
+# 104 bits, only the upper BITS_SIZE_SIG bit is filled with 1
 BITS_MASK_TDC = 2 ** BITS_SIZE_TDC - 1
-# a sequence of BITS_SIZE_TDC 1s
+# 104 bits, only the lower BITS_SIZE_TDC bit is filled with 1
 
 BITS_MASK_SIG_NEWHOD_ALLOR = (2 ** BITS_SIZE_SIG_NEWHOD - 1) - \
     (2 ** (BITS_SIZE_SIG_MRSYNC + BITS_SIZE_SIG_PMT) - 1)
@@ -33,13 +34,20 @@ BITS_MASK_SIG_MRSYNC = 2 ** BITS_SIZE_SIG_MRSYNC - 1
 # only the lower BIT_SIZE_SIG_MRSYNC bit is filled with 1
 
 
-def get_sig_tdc(data, i, n):
-    # get the i-th (start with 0) sig and tdc from the beginning of the array with n tdc data
-    sig = BITS_MASK_SIG & (int.from_bytes(data, 'big') >> (
-        ((n - 1) - i) * DATA_UNIT * 8 + BITS_SIZE_TDC))
-    tdc = BITS_MASK_TDC & (int.from_bytes(data, 'big') >>
-                           (((n - 1) - i) * DATA_UNIT * 8))
-    return sig, tdc
+def hex_then_str(number):
+    # ばかげた関数
+    return format(str(format(number, 'x')), '0>2')
+
+
+def shaper_13elements_to_1elements(elements):
+    # 13 要素を受け取って、1 要素にして返す
+    # 文字列の結合を利用して、1 byteに区切られたものを13 byteにまとめている
+    # 非常にばかげている
+    # 4 byteで動作説明: 入力[0xDE, 0xAD, 0xBE, 0xEF] 出力0xDEADBEEF
+    elements_str = map(hex_then_str, elements)
+    elements_str_list = list(elements_str)
+    element = ''.join(elements_str_list)
+    return int('0x'+element, 16)
 
 
 def hit_newhod_allor(sig):
@@ -66,25 +74,46 @@ if(len(argument) != 3):
 file_path = argument[2]
 file = open(file_path, 'rb')
 
+# --------データの読み込み--------
 data_num = int(argument[1])
 # number of tdc data to read
 TIME_READ_S = time.time()
-data_flagment = file.read(DATA_UNIT * data_num)
+data_bytes = file.read(DATA_UNIT * data_num)
 TIME_READ_F = time.time()
 print("READ TIME [s]: " + str(TIME_READ_F - TIME_READ_S))
 
-data = np.empty(0, dtype=np.int8)
+# --------bitstreamを、1 要素が1 byteの配列にunpack--------
+TIME_UNPACK_S = time.time()
+format_string = str(DATA_UNIT * data_num) + 'B'
+data_array_1bytes = struct.unpack(format_string, data_bytes)
+data_array_1bytes = np.array(data_array_1bytes)
+TIME_UNPACK_F = time.time()
+print("UNPACK TIME [s]: " + str(TIME_UNPACK_F - TIME_UNPACK_S))
+
+# --------1 要素が1 byteの配列を、1 要素が1 byteの要素数13 の配列にする、つまり二次元配列--------
+# --------その後、各要素を13 byteに縮約する--------
+TIME_FORMAT_S = time.time()
+data_array_13bytes = data_array_1bytes.reshape(
+    [(int)(data_array_1bytes.size / DATA_UNIT), DATA_UNIT])
+# 1 要素が、1 要素が1 bytesの要素数 13の配列の、二次元配列
+data = np.array(list(map(shaper_13elements_to_1elements, data_array_13bytes)))
+# 1 要素が13 byteの配列
+# ここをfrompyfuncにするともっと早くなる
+# あるいは、dtypeを自作してnp.frombuffer()を使う
+TIME_FORMAT_F = time.time()
+print("FORMAT TIME [s]: " + str(TIME_FORMAT_F - TIME_FORMAT_S))
 
 TIME_PROCESS_S = time.time()
-for i in range(data_num):
-    sig, tdc = get_sig_tdc(data_flagment, i, data_num)
-    if(hit_newhod_allor(sig)):
-        data = np.append(data, tdc)
+data_sig = (data & BITS_MASK_SIG) >> BITS_SIZE_TDC
+data_tdc = data & BITS_MASK_TDC
 TIME_PROCESS_F = time.time()
 print("PROCESS TIME [s]: " + str(TIME_PROCESS_F - TIME_PROCESS_S))
 
+'''
 TIME_DRAW_S = time.time()
 plt.hist(data, histtype='step', log=True)
 TIME_DRAW_F = time.time()
 print("DRAW TIME [s]: " + str(TIME_DRAW_F - TIME_DRAW_S))
 plt.show()
+'''
+file.close()
