@@ -1,5 +1,4 @@
 import sys
-import struct
 
 import numpy as np
 
@@ -66,86 +65,108 @@ BITS_MASK_SIG_NEWHOD_ALLOR = (2 ** BITS_SIZE_SIG_NEWHOD - 1) - \
 BITS_MASK_SIG_MRSYNC = 2 ** BITS_SIZE_SIG_MRSYNC - 1
 # 77 bits, only the lower BIT_SIZE_SIG_MRSYNC bit is filled with 1
 
+DATA_TYPE = np.dtype((np.void, DATA_UNIT))
+
+
+def bytes_to_int(DEADBEEF):
+    return int.from_bytes(DEADBEEF, 'big')
+
 
 argument = sys.argv
 if(len(argument) != 3):
     print('USEAGE: $ python3 monitor.py number_of_13bytesdata_to_read path_to_datafile')
     sys.exit()
-
 file_path = argument[2]
 file = open(file_path, 'rb')
+
+bytes_to_int_universal = np.frompyfunc(bytes_to_int, 1, 1)
+# converting function to universal function
 
 print('-------- TIME --------')
 # --------READING--------
 data_num = int(argument[1])
 # number of tdc data to read
 TIME_READ_S = time.time()
-data_str = file.read(DATA_UNIT * data_num).hex()
+data_bytes = file.read(DATA_UNIT * data_num)
 # str.hex(), only in python3
 TIME_READ_F = time.time()
 print("READ TIME [s]: " + str(TIME_READ_F - TIME_READ_S))
 
 # --------FORMATTING--------
 TIME_FORMAT_S = time.time()
-data = np.array([int('0x' + data_str[i:i+26], 16)
-                 for i in range(0, len(data_str), 26)])
-# あるいは、dtypeを自作してnp.frombuffer()を使う
+data = np.frombuffer(data_bytes, DATA_TYPE)
+data = bytes_to_int_universal(data)
 TIME_FORMAT_F = time.time()
 print("FORMAT TIME [s]: " + str(TIME_FORMAT_F - TIME_FORMAT_S))
 
 # --------PROCESSING--------
 TIME_PROCESS_S = time.time()
-
 # ----SPILLCOUNT----
-header_index = np.where(((data >> (
-    BITS_SIZE_BOARDID + BITS_SIZE_SPILLCOUNT)) & BITS_MASK_HEADER) == BITS_MASK_HEADER)
+condition_header = (((data >> (BITS_SIZE_BOARDID + BITS_SIZE_SPILLCOUNT))
+                     & BITS_MASK_HEADER) == BITS_MASK_HEADER)
+# making the boolian mask
+condition_footer = ((data & BITS_MASK_FOOTER) == BITS_MASK_FOOTER)
+# making the boolian mask
+header_index = np.where(condition_header)
 # getting the position of the Header
-footer_index = np.where(((data & BITS_MASK_FOOTER) == BITS_MASK_FOOTER))
+footer_index = np.where(condition_footer)
 # getting the position of the Footer
-spillcount_list = np.array(data[header_index[0]] & BITS_MASK_SPILLCOUNT)
+spillcount_list = (np.extract(condition_header, data) & BITS_MASK_SPILLCOUNT)
 # getting the list of the Spillcount
 spillcount = np.concatenate([np.full(header_index[0][0], -1), np.repeat(
     spillcount_list, np.diff(header_index[0], append=data.size))])
 # when there are no Header data in file, header_index[0][0] causes an error
-spillcount = np.delete(spillcount, np.concatenate(
-    [header_index[0], footer_index[0]]))
-# removing Header and Footer
 
 # ----SIG----
 sig = (data & BITS_MASK_SIG) >> BITS_SIZE_TDC
-sig = np.delete(sig, np.concatenate([header_index[0], footer_index[0]]))
-# removing Header and Footer
 
 # ----TDC----
 tdc = data & BITS_MASK_TDC
-tdc = np.delete(tdc, np.concatenate([header_index[0], footer_index[0]]))
-# removing Header and Footer
 
 # ----MR Sync----
-mrsync_index = np.where((sig & BITS_MASK_SIG_MRSYNC) == BITS_MASK_SIG_MRSYNC)
-# getting the position of the MR Sync
-mrsync_list = np.array(tdc[mrsync_index[0]])
-# getting the list of the MR Sync
+condition_mrsync = ((sig & BITS_MASK_SIG_MRSYNC) == BITS_MASK_SIG_MRSYNC) & (
+    ~condition_header) & (~condition_footer)
+# making the boolian mask
+mrsync_index = np.where(condition_mrsync)
+# making the position of the MR Sync
+mrsync_list = np.extract(condition_mrsync, tdc)
+# getting the list of the MR Sync's TDC
 mrsync = np.concatenate([np.full(mrsync_index[0][0], -1),
-                         np.repeat(mrsync_list, np.diff(mrsync_index[0], append=tdc.size))])
-# when there are no Header data in file, header_index[0][0] causes an error
+                         np.repeat(mrsync_list, np.diff(mrsync_index[0], append=data.size))])
+# when there are no MR Sync data in file, mrsync_index[0][0] causes an error
+# P3より後かつMR Syncより前のイベントについての処理が甘い(そのようなイベントは無視できるはず(？))
+
+# ----Header and Footer----
+spillcount = np.delete(spillcount, np.concatenate(
+    [header_index[0], footer_index[0]]))
+# removing Header and Footer
+sig = np.delete(sig, np.concatenate([header_index[0], footer_index[0]]))
+# removing Header and Footer
+tdc = np.delete(tdc, np.concatenate([header_index[0], footer_index[0]]))
+# removing Header and Footer
+mrsync = np.delete(mrsync, np.concatenate([header_index[0], footer_index[0]]))
+# removing Header and Footer
+
+# mp.diff(tdc)とheader_index[0]を使って
+# ここで、TDCのカウントの繰り上がりへの補正をする
 
 # ########Write the analysis code here using sig, tdc, mrsync and spillcount########
-# something =
+condition_newhod_allor = ((sig & BITS_MASK_SIG_NEWHOD_ALLOR) != 0)
+newhod_allor = np.extract(condition_newhod_allor, tdc - mrsync)
 # ##################################################################################
-
 TIME_PROCESS_F = time.time()
 print("PROCESS TIME [s]: " + str(TIME_PROCESS_F - TIME_PROCESS_S))
 
-'''
 # --------DRAWING--------
 TIME_DRAW_S = time.time()
-plt.hist(something, histtype='step', log=True)
+fig = plt.figure()
+ax = fig.add_subplot(1, 1, 1)
+
+ax.hist(newhod_allor*5*pow(10, -3), bins=250, histtype='step', log=True)
+ax.set_ylim(0.1, None)
 TIME_DRAW_F = time.time()
 print("DRAW TIME [s]: " + str(TIME_DRAW_F - TIME_DRAW_S))
 plt.show()
-'''
-
 
 print('-------- DEBUG --------')
 print('sig.size: ' + str(sig.size))
@@ -171,7 +192,6 @@ print('np.unique(spillcount, return_index=True)[1]: ' + str(
 
 print('header_index[0] in raw data: ' + str(header_index[0]))
 print('footer_index[0] in raw data: ' + str(footer_index[0]))
-print('mrsync_index[0] in data subtracted header&footer: ' +
-      str(mrsync_index[0]))
+print('mrsync_index[0] in raw data: ' + str(mrsync_index[0]))
 
 file.close()
