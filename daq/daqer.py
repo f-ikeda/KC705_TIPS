@@ -11,15 +11,14 @@ done
 ・受信した中身が正しい内容であることは、P3(100(Hz)~2.6(kbps))だけを入力して、スピルカウントおよびnc+リダイレクトの結果と照らして確認した
 ・ファイルを自動で切り替えたとき、ファイル間の区切りでデータの欠けがないことは、P3(100(Hz)~2.6(kbps))だけを入力して、スピルカウントを見て確認した
 ・self._buffer_sizeに達しない中途半端なサイズのデータも、きちんと受け取れていることを確認した
-・ファイルを自動で切り替えるさいに、書き込まれるファイルのサイズが13bytesの倍数になるよう、byte_flagmentのサイズを、self.save()に投げる前にifで判断するようにした
-・生成されるファイルサイズがself._file_single_sizeで指定した値と食い違っていたのは、ファイルサイズを確認する時点で実はまだ真に書き込みは行われていなかったためであり、write()のあとすぐさまflush()するようにした
+・ファイルを自動で切り替えるさいに、書き込まれるファイルのサイズが13bytesの倍数になるよう、受信したデータのうち13bytesの定数倍だけsave()して、残りを次回に回すようにした
+・現在のファイルに書き込んだデータサイズをカウントするようにした
 todo
-・レート耐性(nc+リダイレクトとほぼ同程度まで耐えらえるか)
-・flush()の是非について、というよりも、「データの受信」と「ディスクへの書き込み」を別にすべきなのか？？？
-・flush()を、recv()とは別のthreadで定期的に呼び出せば、recv()に戻るまでの時間が短くなるのか？？？
+・P3に100(kHz)(~2.6(Mbps))の信号を入れてヘッダーとフッターだけ見ても、nc+リダイレクトではまともにデータ取得できるのに、daqer.pyではできない！！(4bytesの欠けや、ファイルサイズが指定通りを越してしまう！)
 others
 ・KC705に接続できない場合、あるいは接続が途中で切れた場合の処理について
 ・ctrl+cが押されたときにも、DATA SAVED: 保存先を適切に表示する
+・print()での表示を気の利いたものにする
 '''
 
 import sys
@@ -46,6 +45,8 @@ class Client(object):
         self._file = None
         self._file_single_size = file_single_size
         # maximum size of a single file, in (bytes)
+        self._file_written_size = 0
+        # how many bytes have already been written to current file, in (bytes)
 
         self._sock = None
         # socket
@@ -61,7 +62,7 @@ class Client(object):
         self._sock.close()
 
     def save(self, data):
-        if (os.path.getsize(self._file_path) >= self._file_single_size):
+        if (self._file_written_size >= self._file_single_size):
             self._file.close()
             print('DATA SAVED: ' + self._file_path)
             self._file_path = 'daqqed_data/' + \
@@ -70,33 +71,40 @@ class Client(object):
 
             self._file = open(client._file_path, mode='wb')
             # re-open with new name
+            self._file_written_size = 0
+            # count-clear
 
         self._file.write(data)
-        self._file.flush()
-        # os.path.getsize()が評価される時点で、現に受け取った全てを書き込んでいるとは限らない
-        # 従って、ここで確実にファイルバッファをフラッシュすることで、確実に書き込み済にする
-        # このせいでrecv()に戻るまでが遅くなっては本末転倒なので、要検討
+        self._file_written_size += len(data)
+        # count-up
 
     def recieve(self):
         print('DAQ START: ' + datetime.datetime.now().strftime('%Y%m%d_%H%M%S%f'))
 
+        bytes_locker = bytes()
+        # in case ctrl+c is pressed here, not to be undefined
+        bytes_handbag = bytes()
         try:
             while True:
                 # i.e. always..
-                bytes_flagment = bytes()
+                bytes_locker = bytes()
+                bytes_locker += bytes_handbag
                 # recieved data will be stored in this bytes
-                bytes_flagment = bytes(self._sock.recv(self._buffer_size))
-                if (len(bytes_flagment) % DATA_UNIT == 0):
-                    # recv()の挙動をよくわかっていないのだが、self._buffer_sizeまで溜めていっきに読み込むのではなく、実は逐次byte_flagmentに格納しているらしい(appendみたい？)
-                    # 必ずしもself._buffer_sizeに達してからrecv()を抜けるわけではないよう
-                    # 従って、ここで保存は13(bytes)の倍数ごとと指定しておく
-                    self.save(bytes_flagment)
+                bytes_locker = bytes(self._sock.recv(self._buffer_size))
+                bytes_suitcase = bytes_locker[:len(
+                    bytes_locker)-len(bytes_locker) % DATA_UNIT]
+                bytes_handbag = bytes_locker[len(bytes_suitcase):]
+
+                # len(bytes_locker) = len(bytes_suitcase) + len(bytes_handbag)
+                #                           13*X(bytes)           <13(bytes)
+
+                self.save(bytes_suitcase)
 
         except KeyboardInterrupt:
             # when ctrl+c comes
-            if (len(bytes_flagment) != 0):
-                self.save(bytes_flagment)
-                # because there may be data in bytes_flagment that has not yet been saved
+            if (len(bytes_locker) != 0):
+                self.save(bytes_locker)
+                # because there may be data in bytes_locker that has not yet been saved
             print('\nDAQ STOP: ' +
                   datetime.datetime.now().strftime('%Y%m%d_%H%M%S%f'))
 
