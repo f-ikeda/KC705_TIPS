@@ -15,7 +15,6 @@ done
 ・現在のファイルに書き込んだデータサイズをカウントするようにした
 todo
 ・P3に100(kHz)(~2.6(Mbps))の信号を入れてヘッダーとフッターだけ見ても、nc+リダイレクトではまともにデータ取得できるのに、daqer.pyではできない！！(4bytesの欠けや、ファイルサイズが指定通りを越してしまう！)
-ただし、macbookとLANアダプタ使用
 others
 ・KC705に接続できない場合、あるいは接続が途中で切れた場合の処理について
 ・ctrl+cが押されたときにも、DATA SAVED: 保存先を適切に表示する
@@ -88,7 +87,8 @@ class Client(object):
         try:
             while True:
                 # i.e. always..
-                bytes_locker = bytes_handbag
+                bytes_locker = bytes()
+                bytes_locker += bytes_handbag
                 # recieved data will be stored in this bytes
                 bytes_locker = bytes(self._sock.recv(self._buffer_size))
                 bytes_suitcase = bytes_locker[:len(
