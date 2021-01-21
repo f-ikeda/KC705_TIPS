@@ -8,6 +8,8 @@ import time
 # for debug
 
 # ########DESCRIPTION########
+# USEAGE: $ python3 moniter.py how_many_13bytes_chunk_to_read _path_to_data b(option: for loading December's data)
+#
 # INPUT: raw binary file, such as there are
 #        00000000000001000000000123 <- hit on detector
 #        ABB00012345670123456703272 <- Header
@@ -24,10 +26,17 @@ import time
 #        00010000000000000000000601 <- hit on detector
 #        00000FEE00AAAAAAAAAAAAAAAA <- Footer
 #        01000000000000000000000111 <- hit on detector
-# OUTPUT: sig        = [sig of all the corresponding tdc data]
-#         tdc        = [123, 12a, 450, 541, 711, 957, 601, 123, 340, 601, 111]
-#         mrsync     = [-1, 12a, 12a, 12a, 12a, 957, 957, 957, 340, 340, 340] !!!ヘッダーと1つ目のMR Syncの間のイベントにも-1を対応させろ
-#         spillcount = [-1, 3272,3272,3272,3272,3272,3272,3273,3273,3273]
+#
+# OUTPUT ARRAY: sig        = [sig of all the corresponding tdc data]
+#               tdc        = [123, 12a, 450, 541, 711, 957, 601, 123, 340, 601, 111]
+#               mrsync     = [-1, 12a, 12a, 12a, 12a, 957, 957, 957, 340, 340, 340]
+#               # ヘッダーと1つ目のMR Syncの間のイベントには-1が割り当てられていない(必要ない、そんなイベントないから？)
+#               # クロックカウントがオーバーフローした分のtdcに対して、適切なオフセットを加えられていない
+#               spillcount = [-1, 3272,3272,3272,3272,3272,3272,3273,3273,3273]
+#
+# ISSUES: クロックカウントがオーバーフローした分に、適切なオフセット(2^27-1)を加えられていない(why?)
+#         コインシデンスの処理が未実装(indexがクロックカウントに等しい配列を、コインシデンスを撮りたい分だけ用意して、各要素のminをとる)
+#         データの読み込み、定期的に(how?)ディレクトリの中にある最新のものを探して(globでおk)、勝手に読むようにする
 
 DATA_UNIT = 13
 # bytes
@@ -82,6 +91,7 @@ if(len(argument) == 0):
 
 if(argument[3] == 'b'):
     print('DEBUG MODE')
+    # for treating December's data
     BITS_MASK_HEADER = 0xABB000123456701234567 << (
         BITS_SIZE_BOARDID + BITS_SIZE_SPILLCOUNT)
     # use with just &, on raw(104 bits) data
@@ -123,6 +133,7 @@ header_index = np.where(condition_header)
 footer_index = np.where(condition_footer)
 # getting the position of the Footer
 if (argument[3] == 'b'):
+    # for treating December's data
     spillcount_list = (np.extract(condition_header, data)
                        & BITS_MASK_SPILLCOUNT)
 else:
@@ -150,7 +161,7 @@ mrsync_list = np.extract(condition_mrsync, tdc)
 mrsync = np.concatenate([np.full(mrsync_index[0][0], -1),
                          np.repeat(mrsync_list, np.diff(mrsync_index[0], append=data.size))])
 # when there are no MR Sync data in file, mrsync_index[0][0] causes an error
-# P3より後かつMR Syncより前のイベントについての処理が甘い(そのようなイベントは無視できるはず(？))
+# P3より後かつMR Syncより前のイベントについて、一つ前のスピルでの最後のMR Syncを割り当ててしまう(そのようなイベントはないはず(？))
 
 '''
 # ----Header and Footer----
@@ -166,9 +177,10 @@ mrsync = np.delete(mrsync, np.concatenate([header_index[0], footer_index[0]]))
 '''
 # these processes may not be necessary, because there are boolian masks, such as conditon_header and condition_footer
 
-'''
+
 # ここで、TDCのカウントの繰り上がりへの補正をする
-# 具体的には、あるスピルに属するデータだけに着目して、その差分が負になる点を見つける(MR Syncは常に来ている前提)
+# あるスピルに属するデータだけに着目して、その差分が負になる点を見つける(MR Syncは常に来ている前提)
+# そこでTDCのオーバーフローが起きていると分かるので、
 iter_header_index = iter(header_index[0])
 for a_header, a_next_header in zip(iter_header_index, iter_header_index):
     overflow_point = np.where(np.diff(tdc[a_header:a_next_header - 1] - 1))
@@ -181,8 +193,12 @@ for a_header, a_next_header in zip(iter_header_index, iter_header_index):
     for i, j in zip(iter_a, iter_a):
         tdc[i:j] = tdc[i:j] + counter*(2**27-1)
         counter += 1
-# めちゃくちゃ重い処理、二重for文！！！
-'''
+# めちゃくちゃ重い、二重for文だからか？？
+# しかもバグあり、描いた図が、特定の時刻にだけやけにヒットが多い　
+
+# ここで、コインシデンスをとるような処理を書く
+# array_foo =
+
 
 # ########Write the analysis code here using sig, tdc, mrsync and spillcount########
 condition_newhod_allor = ((sig & BITS_MASK_SIG_NEWHOD_ALLOR) != 0)
@@ -203,7 +219,10 @@ TIME_DRAW_F = time.time()
 print("DRAW TIME [s]: " + str(TIME_DRAW_F - TIME_DRAW_S))
 plt.show()
 
+# ここに、chマップをみるための二次元ヒストグラムを書く
+# fig_bar =
 
+'''
 print('-------- DEBUG --------')
 print('sig.size: ' + str(sig.size))
 print('tdc.size: ' + str(tdc.size))
@@ -229,6 +248,6 @@ print('np.unique(spillcount, return_index=True)[1]: ' + str(
 print('header_index[0] in raw data: ' + str(header_index[0]))
 print('footer_index[0] in raw data: ' + str(footer_index[0]))
 print('mrsync_index[0] in raw data: ' + str(mrsync_index[0]))
-
+'''
 
 file.close()
