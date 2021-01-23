@@ -42,7 +42,7 @@ import time
 #           ANALYZING     ...
 #           DRAWING       ...drawing some plots
 #
-# ISSUES: コインシデンスの処理が未実装(indexがクロックカウントに等しい配列を、コインシデンスを撮りたい分だけ用意して、各要素のminをとる)
+# ISSUES: コインシデンスに関して、delayとwidthを考慮するようにする必要がある(単に、tdc or tdc-mrsyncに+するだけ)
 #         データの読み込み、定期的に(how?)ディレクトリの中にある最新のものを探して(globでおk)、勝手に読むようにする
 #         12月のデータで動作確認をしているため、HeaderとFooterの仕様が古い
 #
@@ -93,6 +93,9 @@ BITS_MASK_TDC = 2 ** BITS_SIZE_TDC - 1
 BITS_MASK_SIG_NEWHOD_ALLOR = (2 ** BITS_SIZE_SIG_NEWHOD - 1) - \
     (2 ** (BITS_SIZE_SIG_MRSYNC + BITS_SIZE_SIG_PMT) - 1)
 # 77 bits, only the upper BIT_SIZE_SIG_NEWHOD bit is filled with 1
+BITS_MASK_SIG_BH1 = 0b0010
+BITS_MASK_SIG_BH2 = 0b0100
+BITS_MASK_SIG_OLDHOD_ALLOR = 0b1000
 BITS_MASK_SIG_MRSYNC = 2 ** BITS_SIZE_SIG_MRSYNC - 1
 # 77 bits, only the lower BIT_SIZE_SIG_MRSYNC bit is filled with 1
 
@@ -162,7 +165,8 @@ def processing_tdc():
     # rewrite local index as global index in all data
     for array_i in index_overflow_and_footer:
         for index_k in range(len(array_i)-1):
-            tdc[array_i[index_k]:array_i[index_k+1]] = tdc[array_i[index_k]:array_i[index_k+1]] + (index_k+1) * 2 ** 27
+            tdc[array_i[index_k]:array_i[index_k+1]] = tdc[array_i[index_k]
+                :array_i[index_k+1]] + (index_k+1) * 2 ** 27
     # mapか何かで書き直せるはず
 
     return tdc
@@ -170,7 +174,7 @@ def processing_tdc():
 
 def processing_mrsync():
     # ----MR SYNC----
-    condition_mrsync = ((sig & BITS_MASK_SIG_MRSYNC) == BITS_MASK_SIG_MRSYNC) & (
+    condition_mrsync = ((sig & BITS_MASK_SIG_MRSYNC) != 0) & (
         ~condition_header) & (~condition_footer)
     # making the boolian mask
     index_mrsync = np.where(condition_mrsync)
@@ -205,16 +209,22 @@ def coincidence(conditions):
     intersect1d_merge = partial(np.intersect1d, assume_unique=True)
     # in a given spill, the set of values of TDC is considered unique because it is monotonically increasing in a narrow sense
 
+    tdc_coincidenced_p3 = np.empty(0, dtype=int)
+    tdc_coincidenced_mrsync = np.empty(0, dtype=int)
     for spill_k in list_spillcount:
         # coincidence has to be considered for each spill independently
         condition_spill_k = ((spillcount == spill_k) & ~
                              condition_header & ~condition_footer)
-        tdc_coincidenced = reduce(intersect1d_merge, tuple(
-            [np.extract(condition_i & condition_spill_k, tdc) for condition_i in conditions]))
-        # ここで等号を用いるのはおかしい、スライスして代入するようにしろ
-        # spillcount配列から、あるスピルについて[先頭:末尾]するべき先頭と末尾は決まるはず
 
-    return tdc_coincidenced
+        tdc_coincidenced_p3 = np.insert(tdc_coincidenced_p3, tdc_coincidenced_p3.size, reduce(intersect1d_merge, tuple(
+            [np.extract(condition_i & condition_spill_k, tdc) for condition_i in conditions])))
+        tdc_coincidenced_mrsync = np.insert(tdc_coincidenced_mrsync, tdc_coincidenced_mrsync.size, reduce(intersect1d_merge, tuple(
+            [np.extract(condition_i & condition_spill_k, tdc - mrsync) for condition_i in conditions])))
+        # np.intersect1d()の結果は積集合だから、インデックスはもはやsig, tdc, mrsync, spillcountと対応しないことに注意
+        # 対応させたければ、np.intersect1d()のreturn_indicies=Trueとして、ファンシーインデックスなどを使ってうまくやる(面倒)
+        # そういう訳で、p3を基準にしたものとmrsyncを基準にしたものとの、二つをここで用意してやる
+
+    return tdc_coincidenced_p3, tdc_coincidenced_mrsync
 
 
 argument = sys.argv
@@ -269,16 +279,24 @@ print("PROCESS TIME [s]: " + str(TIME_PROCESS_F - TIME_PROCESS_S))
 
 # --------ANALYZING--------
 TIME_ANALYZE_S = time.time()
-# ----COINCIDENCE----
-# ここで、コインシデンスをとるような処理を書く
-# array_foo = fromnumpyfunc(foo array_foo,2,1)でdef array_foo[foo]みたいに
 
 # ########Write the analysis code here using sig, tdc, mrsync and spillcount########
+# condition_somedetector = bit-calc.(sig)
 condition_newhod_allor = ((sig & BITS_MASK_SIG_NEWHOD_ALLOR)
                           != 0) & ~condition_header & ~condition_footer
-# making the boolian mask
-newhod_allor = np.extract(condition_newhod_allor, tdc)
-newhod_allor = coincidence((condition_newhod_allor, condition_newhod_allor))
+condition_oldhod_allor = ((sig & BITS_MASK_SIG_OLDHOD_ALLOR)
+                          != 0 & ~condition_header & ~condition_footer)
+condition_bh1 = ((sig & BITS_MASK_SIG_BH1)
+                 != 0 & ~condition_header & ~condition_footer)
+condition_bh2 = ((sig & BITS_MASK_SIG_BH2)
+                 != 0 & ~condition_header & ~condition_footer)
+
+conditions = (condition_newhod_allor, condition_oldhod_allor,
+              condition_bh1, condition_bh2)
+
+#somedetector = np.extract(condition_somedetector, tdc)
+#somedetector = np.extract(condition_somedetector, tdc - mrsync)
+tdc_coincidenced_p3, tdc_coincidenced_mrsync = coincidence(conditions)
 # ##################################################################################
 TIME_ANALYZE_F = time.time()
 print("ANALYZE TIME [s]: " + str(TIME_ANALYZE_F - TIME_ANALYZE_S))
@@ -288,7 +306,7 @@ TIME_DRAW_S = time.time()
 fig = plt.figure()
 ax = fig.add_subplot(1, 1, 1)
 
-ax.hist(newhod_allor*CLOCK_TIME*pow(10, -9),
+ax.hist(tdc_coincidenced_p3*CLOCK_TIME*pow(10, -9),
         bins=250, histtype='step', log=True)
 ax.set_ylim(0.1, None)
 TIME_DRAW_F = time.time()
