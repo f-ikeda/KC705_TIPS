@@ -99,6 +99,20 @@ BITS_MASK_SIG_OLDHOD_ALLOR = 0b1000
 BITS_MASK_SIG_MRSYNC = 2 ** BITS_SIZE_SIG_MRSYNC - 1
 # 77 bits, only the lower BIT_SIZE_SIG_MRSYNC bit is filled with 1
 
+DELAY_BH1_TO_NEWHOD = 20
+# clock
+DELAY_BH2_TO_NEWHOD = 21
+# clock
+DELAY_OLDHOD_TO_NEWHOD = 29
+# clock
+
+DELAY_WIDTH_BH1 = 2
+# clock
+DELAY_WIDTH_BH2 = 2
+# clock
+DELAY_WIDTH_OLDHOD = 2
+# clock
+
 CLOCK_TIME = 5
 # ns
 
@@ -165,8 +179,7 @@ def processing_tdc():
     # rewrite local index as global index in all data
     for array_i in index_overflow_and_footer:
         for index_k in range(len(array_i)-1):
-            tdc[array_i[index_k]:array_i[index_k+1]] = tdc[array_i[index_k]
-                :array_i[index_k+1]] + (index_k+1) * 2 ** 27
+            tdc[array_i[index_k]:array_i[index_k+1]] = tdc[array_i[index_k]                                                           :array_i[index_k+1]] + (index_k+1) * 2 ** 27
     # mapか何かで書き直せるはず
 
     return tdc
@@ -204,7 +217,7 @@ def removing_header_and_footer():
     # removing Header and Footer
 
 
-def coincidence(conditions):
+def coincidence(conditions, delays_to_newhod, delay_width):
     # ----COINCIDENCE----
     intersect1d_merge = partial(np.intersect1d, assume_unique=True)
     # in a given spill, the set of values of TDC is considered unique because it is monotonically increasing in a narrow sense
@@ -217,9 +230,9 @@ def coincidence(conditions):
                              condition_header & ~condition_footer)
 
         tdc_coincidenced_p3 = np.insert(tdc_coincidenced_p3, tdc_coincidenced_p3.size, reduce(intersect1d_merge, tuple(
-            [np.extract(condition_i & condition_spill_k, tdc) for condition_i in conditions])))
+            [np.extract(condition_i_delay_i[0] & condition_spill_k, tdc - condition_i_delay_i[1]) for condition_i_delay_i in zip(conditions, delays_to_newhod)])))
         tdc_coincidenced_mrsync = np.insert(tdc_coincidenced_mrsync, tdc_coincidenced_mrsync.size, reduce(intersect1d_merge, tuple(
-            [np.extract(condition_i & condition_spill_k, tdc - mrsync) for condition_i in conditions])))
+            [np.extract(condition_i_delay_i[0] & condition_spill_k, tdc - mrsync - condition_i_delay_i[1]) for condition_i_delay_i in zip(conditions, delays_to_newhod)])))
         # np.intersect1d()の結果は積集合だから、インデックスはもはやsig, tdc, mrsync, spillcountと対応しないことに注意
         # 対応させたければ、np.intersect1d()のreturn_indicies=Trueとして、ファンシーインデックスなどを使ってうまくやる(面倒)
         # そういう訳で、p3を基準にしたものとmrsyncを基準にしたものとの、二つをここで用意してやる
@@ -284,19 +297,22 @@ TIME_ANALYZE_S = time.time()
 # condition_somedetector = bit-calc.(sig)
 condition_newhod_allor = ((sig & BITS_MASK_SIG_NEWHOD_ALLOR)
                           != 0) & ~condition_header & ~condition_footer
-condition_oldhod_allor = ((sig & BITS_MASK_SIG_OLDHOD_ALLOR)
-                          != 0 & ~condition_header & ~condition_footer)
 condition_bh1 = ((sig & BITS_MASK_SIG_BH1)
                  != 0 & ~condition_header & ~condition_footer)
 condition_bh2 = ((sig & BITS_MASK_SIG_BH2)
                  != 0 & ~condition_header & ~condition_footer)
+condition_oldhod_allor = ((sig & BITS_MASK_SIG_OLDHOD_ALLOR)
+                          != 0 & ~condition_header & ~condition_footer)
 
-conditions = (condition_newhod_allor, condition_oldhod_allor,
-              condition_bh1, condition_bh2)
+conditions = (condition_newhod_allor, condition_bh1,
+              condition_bh2, condition_oldhod_allor,)
+delays_to_newhod = (0, DELAY_BH1_TO_NEWHOD,
+                    DELAY_BH2_TO_NEWHOD, DELAY_OLDHOD_TO_NEWHOD)
 
 #somedetector = np.extract(condition_somedetector, tdc)
 #somedetector = np.extract(condition_somedetector, tdc - mrsync)
-tdc_coincidenced_p3, tdc_coincidenced_mrsync = coincidence(conditions)
+tdc_coincidenced_p3, tdc_coincidenced_mrsync = coincidence(
+    conditions, delays_to_newhod, None)
 # ##################################################################################
 TIME_ANALYZE_F = time.time()
 print("ANALYZE TIME [s]: " + str(TIME_ANALYZE_F - TIME_ANALYZE_S))
