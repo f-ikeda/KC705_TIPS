@@ -9,12 +9,10 @@ import time
 # for debug
 
 # ########DESCRIPTION########
-# USEAGE: $ python3 moniter.py how_many_13bytes_chunk_to_read path_to_data
-#         $ python3 monitor.py 3580598 beamOn-10shoot-20201217.dat (1 spill)
-#         $ python3 monitor.py 7177025 beamOn-10shoot-20201217.dat (2 spill)
+# USEAGE: $ python3 moniter.py how_many_spill_to_read path_to_beamOn-10shoot-20201217.dat
+#         $ python3 monitor.py 1 beamOn-10shoot-20201217.dat (1 spill)
+#         $ python3 monitor.py 2 beamOn-10shoot-20201217.dat (2 spill)
 #                                       :
-#         header: 0       3580598 7177025  10808540 14407270 18044246 21633446 25225710 28865318 32431605
-#         footer: 3580597 7177024 10808539 14407269 18044245 21633445 25225709 28865318 32431604 欠損？
 #
 # INPUT: raw binary file, such as there are
 #        00000000000001000000000123 <- hit on detector
@@ -164,7 +162,7 @@ def processing_tdc():
     # rewrite local index as global index in all data
     for array_i in index_overflow_and_footer:
         for index_k in range(len(array_i)-1):
-            tdc[array_i[index_k]:array_i[index_k+1]] = tdc[array_i[index_k]                                                           :array_i[index_k+1]] + (index_k+1) * 2 ** 27
+            tdc[array_i[index_k]:array_i[index_k+1]] = tdc[array_i[index_k]:array_i[index_k+1]] + (index_k+1) * 2 ** 27
     # mapか何かで書き直せるはず
 
     return tdc
@@ -222,7 +220,7 @@ def coincidence(conditions):
 argument = sys.argv
 if(len(argument) != 3):
     print(argument)
-    print('USEAGE: $ python3 monitor.py number_of_13bytesdata_to_read path_to_datafile')
+    print('$ python3 moniter.py how_many_spill_to_read path_to_beamOn-10shoot-20201217.dat')
     sys.exit()
 
 file_path = argument[2]
@@ -236,13 +234,14 @@ file.read(DATA_UNIT)
 # header: 0       3580598 7177025  10808540 14407270 18044246 21633446 25225710 28865318 32431605
 # footer: 3580597 7177024 10808539 14407269 18044245 21633445 25225709 28865318 32431604 欠損？
 
+data_num = {1: 3580598, 2: 7177205, 3: 10808540, 4: 14407270,
+            5: 18044246, 6: 21633446, 7: 25225710, 8: 28865318}
+spill_num = int(argument[1])
 
 print('-------- TIME --------')
 # --------READING--------
-data_num = int(argument[1])
-# number of tdc data to read
 TIME_READ_S = time.time()
-data_bytes = file.read(DATA_UNIT * data_num)
+data_bytes = file.read(DATA_UNIT * data_num[spill_num])
 TIME_READ_F = time.time()
 print("READ TIME [s]: " + str(TIME_READ_F - TIME_READ_S))
 
