@@ -161,9 +161,9 @@ def processing_sig(data):
     return sig
 
 
-@jit('i4[:](i4[:],i4[:],i4[:])', nopython=True)
+@jit('i8[:](i8[:],i8[:],i8[:])', nopython=True)
 # nopython=True is must
-# i4[:] means np.iint32's array
+# i8[:] means np.iint64's array
 def processing_tdc_overflow(tdc, index_header, index_footer):
 
     # ----TDC CLOCK COUNT OVERFLOW----
@@ -178,7 +178,7 @@ def processing_tdc_overflow(tdc, index_header, index_footer):
     # np.ascontiguousarray() makes array_i as contiguous array in memory
 
     index_overflow_and_footer = [np.zeros(
-        len(array_i)+1, dtype=np.int32) for array_i in index_tdcdiff_within_a_spill]
+        len(array_i)+1, dtype=np.int64) for array_i in index_tdcdiff_within_a_spill]
     # np.insert() is not supported by numba, so preparing an array of the size to need in advance
     for i in range(len(index_tdcdiff_within_a_spill)):
         index_overflow_and_footer[i][: len(
@@ -199,9 +199,9 @@ def processing_tdc(data, index_header, index_footer):
     # ----TDC----
     tdc = data & BITS_MASK_TDC
     # ----TDC CLOCK COUNT OVERFLOW----
-    index_header = index_header.astype(np.int32)
-    index_footer = index_footer.astype(np.int32)
-    tdc = tdc.astype(np.int32)
+    index_header = index_header.astype(np.int64)
+    index_footer = index_footer.astype(np.int64)
+    tdc = tdc.astype(np.int64)
     tdc = processing_tdc_overflow(tdc, index_header, index_footer)
 
     return tdc
@@ -239,9 +239,9 @@ def removing_header_and_footer():
     # removing Header and Footer
 
 
-@jit('i4[:](i4[:],i4[:])', nopython=True)
+@jit('i8[:](i8[:],i8[:])', nopython=True)
 # nopython=True is must
-# i4[:] means np.iint32's array
+# i8[:] means np.iint64's array
 def intersect1d_alternative(array_foo, array_bar):
     # both array of array_foo and array_bar must be sorted
     array_intersected = np.empty_like(array_foo)
@@ -262,11 +262,9 @@ def intersect1d_alternative(array_foo, array_bar):
 
 def coincidence(conditions, delays_to_newhod, delay_width):
     # ----COINCIDENCE----
-    intersect1d_merge = partial(np.intersect1d, assume_unique=True)
-    # in a given spill, the set of values of TDC is considered unique because it is monotonically increasing in a narrow sense
 
-    tdc_coincidenced_p3 = np.empty(0, dtype=int)
-    tdc_coincidenced_mrsync = np.empty(0, dtype=int)
+    tdc_coincidenced_p3 = np.empty(0, dtype=np.int64)
+    tdc_coincidenced_mrsync = np.empty(0, dtype=np.int64)
     for spill_k in list_spillcount:
         # coincidence has to be considered for each spill independently
         condition_spill_k = ((spillcount == spill_k) & ~
@@ -274,11 +272,11 @@ def coincidence(conditions, delays_to_newhod, delay_width):
 
         # ----intersect1d_alternative()で代用----
         # np.intersect1d()はソート済みであることを活かせていない
-        # tdcをnp.int32で扱えば、型指定でコンパイルできるから、早くなる
+        # tdcをnp.int64で扱えば、型指定でコンパイルできるから、早くなる
         tdc_coincidenced_p3 = np.insert(tdc_coincidenced_p3, tdc_coincidenced_p3.size, reduce(intersect1d_alternative, tuple(
-            [np.extract(condition_i_delay_i[0] & condition_spill_k, tdc - condition_i_delay_i[1]).astype(np.int32) for condition_i_delay_i in zip(conditions, delays_to_newhod)])))
+            [np.extract(condition_i_delay_i[0] & condition_spill_k, tdc - condition_i_delay_i[1]) for condition_i_delay_i in zip(conditions, delays_to_newhod)])))
         tdc_coincidenced_mrsync = np.insert(tdc_coincidenced_mrsync, tdc_coincidenced_mrsync.size, reduce(intersect1d_alternative, tuple(
-            [np.extract(condition_i_delay_i[0] & condition_spill_k, tdc - mrsync - condition_i_delay_i[1]).astype(np.int32) for condition_i_delay_i in zip(conditions, delays_to_newhod)])))
+            [np.extract(condition_i_delay_i[0] & condition_spill_k, tdc - mrsync - condition_i_delay_i[1]) for condition_i_delay_i in zip(conditions, delays_to_newhod)])))
         # np.intersect1d()の結果は積集合だから、インデックスはもはやsig, tdc, mrsync, spillcountと対応しないことに注意
         # 対応させたければ、np.intersect1d()のreturn_indicies=Trueとして、ファンシーインデックスなどを使ってうまくやる(面倒)
         # そういう訳で、p3を基準にしたものとmrsyncを基準にしたものとの、二つをここで用意してやる
