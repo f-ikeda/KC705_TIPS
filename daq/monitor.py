@@ -3,6 +3,8 @@ import sys
 import numpy as np
 from functools import partial, reduce
 
+from numba import jit
+
 import matplotlib.pyplot as plt
 
 import time
@@ -42,9 +44,10 @@ import time
 #           ANALYZING     ...
 #           DRAWING       ...drawing some plots
 #
-# ISSUES: コインシデンスに関して、delayとwidthを考慮するようにする必要がある(単に、tdc or tdc-mrsyncに+するだけ)
+# ISSUES: コインシデンスに関して、widthを考慮するようにする必要がある(newhodのallorに対して、+-1,0の配列を用意するだけ)
 #         データの読み込み、定期的に(how?)ディレクトリの中にある最新のものを探して(globでおk)、勝手に読むようにする
 #         12月のデータで動作確認をしているため、HeaderとFooterの仕様が古い
+#         numbaで高速化を狙えることがわかった(64 bitまでしかいけないので、tdcに関してのみ？->sigで似たことをやろうと思うと、64+64など凝ったことをせねばならない)
 #
 # 仕様: ファイル中に、HeaderとFooterとが、同数かつHeader,Footer,...,Header,Footerの順に、必ず1 組以上含まれていなければいけない
 #       ファイル中に、MR Syncが必ず1 つ以上含まれていなければいけない
@@ -217,6 +220,27 @@ def removing_header_and_footer():
     # removing Header and Footer
 
 
+@jit('u4[:](u4[:],u4[:])', nopython=True)
+# nopython=True is must
+# u4[:] means np.uint32's array
+def intersect1d_alternative(array_foo, array_bar):
+    # both array of array_foo and array_bar must be sorted
+    array_intersected = np.empty_like(array_foo)
+
+    index_i = index_j = index_k = 0
+    while index_i < array_foo.size and index_j < array_bar.size:
+        if array_foo[index_i] == array_bar[index_j]:
+            array_intersected[index_k] = array_foo[index_i]
+            index_i += 1
+            index_j += 1
+            index_k += 1
+        elif array_foo[index_i] < array_bar[index_j]:
+            index_i += 1
+        else:
+            index_j += 1
+    return array_intersected[:index_k]
+
+
 def coincidence(conditions, delays_to_newhod, delay_width):
     # ----COINCIDENCE----
     intersect1d_merge = partial(np.intersect1d, assume_unique=True)
@@ -229,6 +253,8 @@ def coincidence(conditions, delays_to_newhod, delay_width):
         condition_spill_k = ((spillcount == spill_k) & ~
                              condition_header & ~condition_footer)
 
+        '''
+        # ----np.intersect1d()はソートされているという利点を生かしていないゆえに遅い----
         tdc_coincidenced_p3 = np.insert(tdc_coincidenced_p3, tdc_coincidenced_p3.size, reduce(intersect1d_merge, tuple(
             [np.extract(condition_i_delay_i[0] & condition_spill_k, tdc - condition_i_delay_i[1]) for condition_i_delay_i in zip(conditions, delays_to_newhod)])))
         tdc_coincidenced_mrsync = np.insert(tdc_coincidenced_mrsync, tdc_coincidenced_mrsync.size, reduce(intersect1d_merge, tuple(
@@ -236,6 +262,14 @@ def coincidence(conditions, delays_to_newhod, delay_width):
         # np.intersect1d()の結果は積集合だから、インデックスはもはやsig, tdc, mrsync, spillcountと対応しないことに注意
         # 対応させたければ、np.intersect1d()のreturn_indicies=Trueとして、ファンシーインデックスなどを使ってうまくやる(面倒)
         # そういう訳で、p3を基準にしたものとmrsyncを基準にしたものとの、二つをここで用意してやる
+        '''
+
+        # ----intersect1d_alternative()で代用----
+        # tdcをnp.uint32で扱えば、型指定でコンパイルできるから、早くなる
+        tdc_coincidenced_p3 = np.insert(tdc_coincidenced_p3, tdc_coincidenced_p3.size, reduce(intersect1d_alternative, tuple(
+            [np.extract(condition_i_delay_i[0] & condition_spill_k, tdc - condition_i_delay_i[1]).astype(np.uint32) for condition_i_delay_i in zip(conditions, delays_to_newhod)])))
+        tdc_coincidenced_mrsync = np.insert(tdc_coincidenced_mrsync, tdc_coincidenced_mrsync.size, reduce(intersect1d_alternative, tuple(
+            [np.extract(condition_i_delay_i[0] & condition_spill_k, tdc - mrsync - condition_i_delay_i[1]).astype(np.uint32) for condition_i_delay_i in zip(conditions, delays_to_newhod)])))
 
     return tdc_coincidenced_p3, tdc_coincidenced_mrsync
 
