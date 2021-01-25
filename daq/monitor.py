@@ -48,6 +48,7 @@ import time
 #         データの読み込み、定期的に(how?)ディレクトリの中にある最新のものを探して(globでおk)、勝手に読むようにする
 #         12月のデータで動作確認をしているため、HeaderとFooterの仕様が古い
 #         numbaで高速化を狙えることがわかった(64 bitまでしかいけないので、tdcに関してのみ？->sigで似たことをやろうと思うと、64+64など凝ったことをせねばならない)
+#         関数をnumbaで置き換えていく
 #
 # 仕様: ファイル中に、HeaderとFooterとが、同数かつHeader,Footer,...,Header,Footerの順に、必ず1 組以上含まれていなければいけない
 #       ファイル中に、MR Syncが必ず1 つ以上含まれていなければいけない
@@ -133,7 +134,7 @@ def formatting_data(data_bytes):
     return data
 
 
-def processing_spillcount():
+def processing_spillcount(data):
     # ----SPILLCOUNT----
     condition_header = ((data & BITS_MASK_HEADER) == BITS_WORD_HEADER)
     # making the boolian mask
@@ -150,40 +151,58 @@ def processing_spillcount():
         list_spillcount, np.diff(index_header[0], append=data.size))])
     # when there are no Header in file, index_header[0][0] causes an error
 
-    return spillcount, index_header, index_footer, condition_header, condition_footer, list_spillcount
+    return spillcount, index_header[0], index_footer[0], condition_header, condition_footer, list_spillcount
 
 
-def processing_sig():
+def processing_sig(data):
     # ----SIG----
     sig = (data & BITS_MASK_SIG) >> BITS_SIZE_TDC
 
     return sig
 
 
-def processing_tdc():
-    # ----TDC----
-    tdc = data & BITS_MASK_TDC
+@jit('i4[:](i4[:],i4[:],i4[:])', nopython=True)
+# nopython=True is must
+# i4[:] means np.iint32's array
+def processing_tdc_overflow(tdc, index_header, index_footer):
 
     # ----TDC CLOCK COUNT OVERFLOW----
-    iter_index_header = iter(index_header[0])
-    iter_index_fotter = iter(index_footer[0])
-    index_header_and_footer = np.array(
-        [i for i in zip(iter_index_header, iter_index_fotter)])
+    index_header_and_footer = np.dstack((index_header, index_footer))
 
     index_within_a_spill = [tdc[array_i[0]+1:array_i[1]]
-                            for array_i in index_header_and_footer]
+                            for array_i in index_header_and_footer[0]]
     # +1 for the first TDC data from Header
-    index_tdcdiff_within_a_spill = [np.where(np.diff(array_i) < 0)[
+    index_tdcdiff_within_a_spill = [np.where(np.diff(np.ascontiguousarray(array_i)) < 0)[
         0] for array_i in index_within_a_spill]
     # np.diff() returns local index in input
+    # np.ascontiguousarray() makes array_i as contiguous array in memory
 
-    index_overflow_and_footer = [np.insert(array_i+index_header[0][i]+1+1, array_i.size, index_footer[0][index_k])
-                                 for array_i, i, index_k in zip(index_tdcdiff_within_a_spill, range(index_header[0].size), range(index_footer[0].size))]
+    index_overflow_and_footer = [np.zeros(
+        len(array_i)+1, dtype=np.int32) for array_i in index_tdcdiff_within_a_spill]
+    # np.insert() is not supported by numba, so preparing an array of the size to need in advance
+    for i in range(len(index_tdcdiff_within_a_spill)):
+        index_overflow_and_footer[i][: len(
+            index_tdcdiff_within_a_spill[i])] = index_tdcdiff_within_a_spill[i] + index_header[i]+1+1
+        index_overflow_and_footer[i][-1] = index_footer[i]
     # rewrite local index as global index in all data
+    # opverwriting the values of a pre-defined array
     for array_i in index_overflow_and_footer:
         for index_k in range(len(array_i)-1):
-            tdc[array_i[index_k]:array_i[index_k+1]] = tdc[array_i[index_k]                                                           :array_i[index_k+1]] + (index_k+1) * 2 ** 27
+            tdc[array_i[index_k]: array_i[index_k+1]] = tdc[array_i[index_k]
+                : array_i[index_k+1]] + (index_k+1) * 2 ** 27
     # mapか何かで書き直せるはず
+
+    return tdc
+
+
+def processing_tdc(data, index_header, index_footer):
+    # ----TDC----
+    tdc = data & BITS_MASK_TDC
+    # ----TDC CLOCK COUNT OVERFLOW----
+    index_header = index_header.astype(np.int32)
+    index_footer = index_footer.astype(np.int32)
+    tdc = tdc.astype(np.int32)
+    tdc = processing_tdc_overflow(tdc, index_header, index_footer)
 
     return tdc
 
@@ -220,9 +239,9 @@ def removing_header_and_footer():
     # removing Header and Footer
 
 
-@jit('u4[:](u4[:],u4[:])', nopython=True)
+@jit('i4[:](i4[:],i4[:])', nopython=True)
 # nopython=True is must
-# u4[:] means np.uint32's array
+# i4[:] means np.iint32's array
 def intersect1d_alternative(array_foo, array_bar):
     # both array of array_foo and array_bar must be sorted
     array_intersected = np.empty_like(array_foo)
@@ -253,23 +272,16 @@ def coincidence(conditions, delays_to_newhod, delay_width):
         condition_spill_k = ((spillcount == spill_k) & ~
                              condition_header & ~condition_footer)
 
-        '''
-        # ----np.intersect1d()はソートされているという利点を生かしていないゆえに遅い----
-        tdc_coincidenced_p3 = np.insert(tdc_coincidenced_p3, tdc_coincidenced_p3.size, reduce(intersect1d_merge, tuple(
-            [np.extract(condition_i_delay_i[0] & condition_spill_k, tdc - condition_i_delay_i[1]) for condition_i_delay_i in zip(conditions, delays_to_newhod)])))
-        tdc_coincidenced_mrsync = np.insert(tdc_coincidenced_mrsync, tdc_coincidenced_mrsync.size, reduce(intersect1d_merge, tuple(
-            [np.extract(condition_i_delay_i[0] & condition_spill_k, tdc - mrsync - condition_i_delay_i[1]) for condition_i_delay_i in zip(conditions, delays_to_newhod)])))
+        # ----intersect1d_alternative()で代用----
+        # np.intersect1d()はソート済みであることを活かせていない
+        # tdcをnp.int32で扱えば、型指定でコンパイルできるから、早くなる
+        tdc_coincidenced_p3 = np.insert(tdc_coincidenced_p3, tdc_coincidenced_p3.size, reduce(intersect1d_alternative, tuple(
+            [np.extract(condition_i_delay_i[0] & condition_spill_k, tdc - condition_i_delay_i[1]).astype(np.int32) for condition_i_delay_i in zip(conditions, delays_to_newhod)])))
+        tdc_coincidenced_mrsync = np.insert(tdc_coincidenced_mrsync, tdc_coincidenced_mrsync.size, reduce(intersect1d_alternative, tuple(
+            [np.extract(condition_i_delay_i[0] & condition_spill_k, tdc - mrsync - condition_i_delay_i[1]).astype(np.int32) for condition_i_delay_i in zip(conditions, delays_to_newhod)])))
         # np.intersect1d()の結果は積集合だから、インデックスはもはやsig, tdc, mrsync, spillcountと対応しないことに注意
         # 対応させたければ、np.intersect1d()のreturn_indicies=Trueとして、ファンシーインデックスなどを使ってうまくやる(面倒)
         # そういう訳で、p3を基準にしたものとmrsyncを基準にしたものとの、二つをここで用意してやる
-        '''
-
-        # ----intersect1d_alternative()で代用----
-        # tdcをnp.uint32で扱えば、型指定でコンパイルできるから、早くなる
-        tdc_coincidenced_p3 = np.insert(tdc_coincidenced_p3, tdc_coincidenced_p3.size, reduce(intersect1d_alternative, tuple(
-            [np.extract(condition_i_delay_i[0] & condition_spill_k, tdc - condition_i_delay_i[1]).astype(np.uint32) for condition_i_delay_i in zip(conditions, delays_to_newhod)])))
-        tdc_coincidenced_mrsync = np.insert(tdc_coincidenced_mrsync, tdc_coincidenced_mrsync.size, reduce(intersect1d_alternative, tuple(
-            [np.extract(condition_i_delay_i[0] & condition_spill_k, tdc - mrsync - condition_i_delay_i[1]).astype(np.uint32) for condition_i_delay_i in zip(conditions, delays_to_newhod)])))
 
     return tdc_coincidenced_p3, tdc_coincidenced_mrsync
 
@@ -291,7 +303,7 @@ file.read(DATA_UNIT)
 # header: 0       3580598 7177025  10808540 14407270 18044246 21633446 25225710 28865318 32431605
 # footer: 3580597 7177024 10808539 14407269 18044245 21633445 25225709 28865318 32431604 欠損？
 
-data_num = {1: 3580598, 2: 7177205, 3: 10808540, 4: 14407270,
+data_num = {1: 3580598, 2: 7177025, 3: 10808540, 4: 14407270,
             5: 18044246, 6: 21633446, 7: 25225710, 8: 28865318}
 spill_num = int(argument[1])
 
@@ -314,11 +326,12 @@ print("FORMAT TIME [s]: " + str(TIME_FORMAT_F - TIME_FORMAT_S))
 # --------PROCESSING--------
 TIME_PROCESS_S = time.time()
 # ----SPILLCOUNT----
-spillcount, index_header, index_footer, condition_header, condition_footer, list_spillcount = processing_spillcount()
+spillcount, index_header, index_footer, condition_header, condition_footer, list_spillcount = processing_spillcount(
+    data)
 # ----SIG----
-sig = processing_sig()
+sig = processing_sig(data)
 # ----TDC----
-tdc = processing_tdc()
+tdc = processing_tdc(data, index_header, index_footer)
 # ----MR SYNC----
 mrsync, condition_mrsync, list_mrsync = processing_mrsync()
 TIME_PROCESS_F = time.time()
@@ -343,8 +356,8 @@ conditions = (condition_newhod_allor, condition_bh1,
 delays_to_newhod = (0, DELAY_BH1_TO_NEWHOD,
                     DELAY_BH2_TO_NEWHOD, DELAY_OLDHOD_TO_NEWHOD)
 
-#somedetector = np.extract(condition_somedetector, tdc)
-#somedetector = np.extract(condition_somedetector, tdc - mrsync)
+# somedetector = np.extract(condition_somedetector, tdc)
+# somedetector = np.extract(condition_somedetector, tdc - mrsync)
 tdc_coincidenced_p3, tdc_coincidenced_mrsync = coincidence(
     conditions, delays_to_newhod, None)
 # ##################################################################################
@@ -371,28 +384,22 @@ print('-------- DEBUG --------')
 print('data.dtype: ' + str(data.dtype))
 print('sig.dtype: ' + str(sig.dtype))
 print('tdc.dtype: ' + str(tdc.dtype))
-
 print('sig.size: ' + str(sig.size))
 print('tdc.size: ' + str(tdc.size))
 print('mrsync.size: ' + str(mrsync.size))
 print('spillcount.size: ' + str(spillcount.size))
-
 print('mrsync: ' + str(mrsync))
 print('spillcount: ' + str(spillcount))
-
 print('list_mrsync: ' + str(list_mrsync))
 print('list_spillcount: ' + str(list_spillcount))
-
 print('np.unique(mrsync).size: ' +
       str(np.unique(mrsync).size))
 print('np.unique(spillcount).size: ' +
       str(np.unique(spillcount).size))
-
 print('np.unique(mrsync, return_index=True)[1]: ' + str(
     np.unique(mrsync, return_index=True)[1]))
 print('np.unique(spillcount, return_index=True)[1]: ' + str(
     np.unique(spillcount, return_index=True)[1]))
-
 print('index_header[0]: ' + str(index_header[0]))
 print('index_footer[0]: ' + str(index_footer[0]))
 print('index_mrsync[0]: ' + str(index_mrsync[0]))
