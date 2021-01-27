@@ -110,12 +110,8 @@ DELAY_BH2_TO_NEWHOD = 21
 DELAY_OLDHOD_TO_NEWHOD = 29
 # clock
 
-DELAY_WIDTH_BH1 = 2
-# clock
-DELAY_WIDTH_BH2 = 2
-# clock
-DELAY_WIDTH_OLDHOD = 2
-# clock
+DELAY_WIDTH = [-1, 0, 1]
+# 3 clock, +-1 and 0
 
 CLOCK_TIME = 5
 # ns
@@ -125,6 +121,7 @@ DATA_TYPE = np.dtype((np.void, DATA_UNIT))
 
 def bytes_to_int(DEADBEEF):
     return int.from_bytes(DEADBEEF, 'big')
+    # 遅い！
 
 
 def formatting_data(data_bytes):
@@ -136,6 +133,8 @@ def formatting_data(data_bytes):
 
 def processing_spillcount(data):
     # ----SPILLCOUNT----
+    TIME_SPILLCOUNT_S = time.time()
+
     condition_header = ((data & BITS_MASK_HEADER) == BITS_WORD_HEADER)
     # making the boolian mask
     condition_footer = ((data & BITS_MASK_FOOTER) == BITS_WORD_FOOTER)
@@ -151,21 +150,28 @@ def processing_spillcount(data):
         list_spillcount, np.diff(index_header[0], append=data.size))])
     # when there are no Header in file, index_header[0][0] causes an error
 
+    TIME_SPILLCOUNT_F = time.time()
+    print("(SPILLCOUNT TIME [s]: " +
+          str(TIME_SPILLCOUNT_F - TIME_SPILLCOUNT_S) + ')')
+
     return spillcount, index_header[0], index_footer[0], condition_header, condition_footer, list_spillcount
 
 
 def processing_sig(data):
     # ----SIG----
+    TIME_SIG_S = time.time()
+
     sig = (data & BITS_MASK_SIG) >> BITS_SIZE_TDC
+
+    TIME_SIG_F = time.time()
+    print("(SIG TIME [s]: " + str(TIME_SIG_F - TIME_SIG_S) + ')')
 
     return sig
 
 
 @jit('i8[:](i8[:],i8[:],i8[:])', nopython=True)
-# nopython=True is must
 # i8[:] means np.iint64's array
 def processing_tdc_overflow(tdc, index_header, index_footer):
-
     # ----TDC CLOCK COUNT OVERFLOW----
     index_header_and_footer = np.dstack((index_header, index_footer))
 
@@ -186,11 +192,11 @@ def processing_tdc_overflow(tdc, index_header, index_footer):
         index_overflow_and_footer[i][-1] = index_footer[i]
     # rewrite local index as global index in all data
     # opverwriting the values of a pre-defined array
+
     for array_i in index_overflow_and_footer:
         for index_k in range(len(array_i)-1):
             tdc[array_i[index_k]: array_i[index_k+1]] = tdc[array_i[index_k]
                 : array_i[index_k+1]] + (index_k+1) * 2 ** 27
-    # mapか何かで書き直せるはず
 
     return tdc
 
@@ -198,10 +204,11 @@ def processing_tdc_overflow(tdc, index_header, index_footer):
 def processing_tdc(data, index_header, index_footer):
     # ----TDC----
     tdc = data & BITS_MASK_TDC
-    # ----TDC CLOCK COUNT OVERFLOW----
+
     index_header = index_header.astype(np.int64)
     index_footer = index_footer.astype(np.int64)
     tdc = tdc.astype(np.int64)
+
     tdc = processing_tdc_overflow(tdc, index_header, index_footer)
 
     return tdc
@@ -211,11 +218,10 @@ def processing_mrsync():
     # ----MR SYNC----
     condition_mrsync = ((sig & BITS_MASK_SIG_MRSYNC) != 0) & (
         ~condition_header) & (~condition_footer)
-    # making the boolian mask
+
     index_mrsync = np.where(condition_mrsync)
-    # getting the position of the MR Sync
     list_mrsync = np.extract(condition_mrsync, tdc)
-    # getting the list of the MR Sync's TDC
+
     mrsync = np.concatenate([np.full(index_mrsync[0][0], -1), np.repeat(
         list_mrsync, np.diff(index_mrsync[0], append=data.size))])
     # when there are no MR Sync data in file, index_mrsync[0][0] causes an error
@@ -225,22 +231,16 @@ def processing_mrsync():
 
 def removing_header_and_footer():
     # this function may not be necessary, because there are boolian masks, such as conditon_header and condition_footer
-
     # ----REMOVING HEADER AND FOOTER----
     spillcount = np.delete(spillcount, np.concatenate(
         [index_header[0], index_footer[0]]))
-    # removing Header and Footer
     sig = np.delete(sig, np.concatenate([index_header[0], index_footer[0]]))
-    # removing Header and Footer
     tdc = np.delete(tdc, np.concatenate([index_header[0], index_footer[0]]))
-    # removing Header and Footer
     mrsync = np.delete(mrsync, np.concatenate(
         [index_header[0], index_footer[0]]))
-    # removing Header and Footer
 
 
 @jit('i8[:](i8[:],i8[:])', nopython=True)
-# nopython=True is must
 # i8[:] means np.iint64's array
 def intersect1d_alternative(array_foo, array_bar):
     # both array of array_foo and array_bar must be sorted
@@ -257,6 +257,7 @@ def intersect1d_alternative(array_foo, array_bar):
             index_i += 1
         else:
             index_j += 1
+
     return array_intersected[:index_k]
 
 
@@ -265,21 +266,20 @@ def coincidence(conditions, delays_to_newhod, delay_width):
 
     tdc_coincidenced_p3 = np.empty(0, dtype=np.int64)
     tdc_coincidenced_mrsync = np.empty(0, dtype=np.int64)
+
+    tdc_delayed = [(tdc - delay_i)
+                   for delay_i in delays_to_newhod]
+    # pre-calculate in order to avoid unnecessary repetition in the for statement
+
     for spill_k in list_spillcount:
         # coincidence has to be considered for each spill independently
         condition_spill_k = ((spillcount == spill_k) & ~
                              condition_header & ~condition_footer)
 
-        # ----intersect1d_alternative()で代用----
-        # np.intersect1d()はソート済みであることを活かせていない
-        # tdcをnp.int64で扱えば、型指定でコンパイルできるから、早くなる
-        tdc_coincidenced_p3 = np.insert(tdc_coincidenced_p3, tdc_coincidenced_p3.size, reduce(intersect1d_alternative, tuple(
-            [np.extract(condition_i_delay_i[0] & condition_spill_k, tdc - condition_i_delay_i[1]) for condition_i_delay_i in zip(conditions, delays_to_newhod)])))
-        tdc_coincidenced_mrsync = np.insert(tdc_coincidenced_mrsync, tdc_coincidenced_mrsync.size, reduce(intersect1d_alternative, tuple(
-            [np.extract(condition_i_delay_i[0] & condition_spill_k, tdc - mrsync - condition_i_delay_i[1]) for condition_i_delay_i in zip(conditions, delays_to_newhod)])))
-        # np.intersect1d()の結果は積集合だから、インデックスはもはやsig, tdc, mrsync, spillcountと対応しないことに注意
-        # 対応させたければ、np.intersect1d()のreturn_indicies=Trueとして、ファンシーインデックスなどを使ってうまくやる(面倒)
-        # そういう訳で、p3を基準にしたものとmrsyncを基準にしたものとの、二つをここで用意してやる
+        tdc_coincidenced_p3 = np.insert(tdc_coincidenced_p3, tdc_coincidenced_p3.size, reduce(
+            intersect1d_alternative, tuple([np.extract(condition_i_and_tdc_delayed_i[0] & condition_spill_k, condition_i_and_tdc_delayed_i[1]) for condition_i_and_tdc_delayed_i in zip(conditions, tdc_delayed)])))
+        tdc_coincidenced_mrsync = np.insert(tdc_coincidenced_p3, tdc_coincidenced_p3.size, reduce(
+            intersect1d_alternative, tuple([np.extract(condition_i_and_tdc_delayed_i[0] & condition_spill_k, condition_i_and_tdc_delayed_i[1] - mrsync) for condition_i_and_tdc_delayed_i in zip(conditions, tdc_delayed)])))
 
     return tdc_coincidenced_p3, tdc_coincidenced_mrsync
 
@@ -302,13 +302,15 @@ file.read(DATA_UNIT)
 # footer: 3580597 7177024 10808539 14407269 18044245 21633445 25225709 28865318 32431604 欠損？
 
 data_num = {1: 3580598, 2: 7177025, 3: 10808540, 4: 14407270,
-            5: 18044246, 6: 21633446, 7: 25225710, 8: 28865318}
+            5: 18044246, 6: 21633446, 7: 25225710, 8: 28865318, 9: 32431605}
 spill_num = int(argument[1])
 
 print('-------- TIME --------')
 # --------READING--------
 TIME_READ_S = time.time()
+
 data_bytes = file.read(DATA_UNIT * data_num[spill_num])
+
 TIME_READ_F = time.time()
 print("READ TIME [s]: " + str(TIME_READ_F - TIME_READ_S))
 
@@ -317,12 +319,15 @@ bytes_to_int_universal = np.frompyfunc(bytes_to_int, 1, 1)
 # converting function to universal function
 
 TIME_FORMAT_S = time.time()
+
 data = formatting_data(data_bytes)
+
 TIME_FORMAT_F = time.time()
 print("FORMAT TIME [s]: " + str(TIME_FORMAT_F - TIME_FORMAT_S))
 
 # --------PROCESSING--------
 TIME_PROCESS_S = time.time()
+
 # ----SPILLCOUNT----
 spillcount, index_header, index_footer, condition_header, condition_footer, list_spillcount = processing_spillcount(
     data)
@@ -332,6 +337,7 @@ sig = processing_sig(data)
 tdc = processing_tdc(data, index_header, index_footer)
 # ----MR SYNC----
 mrsync, condition_mrsync, list_mrsync = processing_mrsync()
+
 TIME_PROCESS_F = time.time()
 print("PROCESS TIME [s]: " + str(TIME_PROCESS_F - TIME_PROCESS_S))
 
@@ -354,30 +360,38 @@ conditions = (condition_newhod_allor, condition_bh1,
 delays_to_newhod = (0, DELAY_BH1_TO_NEWHOD,
                     DELAY_BH2_TO_NEWHOD, DELAY_OLDHOD_TO_NEWHOD)
 
-# somedetector = np.extract(condition_somedetector, tdc)
-# somedetector = np.extract(condition_somedetector, tdc - mrsync)
+# tdc_somedetector_p3 = np.extract(condition_somedetector, tdc)
+# tdc_somedetector_mrsync = np.extract(condition_somedetector, tdc - mrsync)
 tdc_coincidenced_p3, tdc_coincidenced_mrsync = coincidence(
     conditions, delays_to_newhod, None)
 # ##################################################################################
+
 TIME_ANALYZE_F = time.time()
 print("ANALYZE TIME [s]: " + str(TIME_ANALYZE_F - TIME_ANALYZE_S))
 
 # --------DRAWING--------
 TIME_DRAW_S = time.time()
+
 fig = plt.figure()
 ax = fig.add_subplot(1, 1, 1)
 
 ax.hist(tdc_coincidenced_p3*CLOCK_TIME*pow(10, -9),
         bins=250, histtype='step', log=True)
 ax.set_ylim(0.1, None)
+
 TIME_DRAW_F = time.time()
+
 print("DRAW TIME [s]: " + str(TIME_DRAW_F - TIME_DRAW_S))
 plt.show()
 
-# ここに、chマップをみるための二次元ヒストグラムを書く
-# fig_bar =
+# chマップをみたいなら、ここに書く
+# condition_ch_i = bit-calc.(sig)
+# hit_num = np.sum(condition_i)
+# fig_chmap =
 
 '''
+
+
 print('-------- DEBUG --------')
 print('data.dtype: ' + str(data.dtype))
 print('sig.dtype: ' + str(sig.dtype))
