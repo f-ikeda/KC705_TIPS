@@ -195,7 +195,8 @@ def processing_tdc_overflow(tdc, index_header, index_footer):
 
     for array_i in index_overflow_and_footer:
         for index_k in range(len(array_i)-1):
-            tdc[array_i[index_k]: array_i[index_k+1]] = tdc[array_i[index_k]: array_i[index_k+1]] + (index_k+1) * 2 ** 27
+            tdc[array_i[index_k]: array_i[index_k+1]] = tdc[array_i[index_k]
+                : array_i[index_k+1]] + (index_k+1) * 2 ** 27
 
     return tdc
 
@@ -262,12 +263,15 @@ def intersect1d_alternative(array_foo, array_bar):
 
 def coincidence(conditions, delays_to_newhod, delay_width):
     # ----COINCIDENCE----
-    for i in DELAY_WIDTH:
 
-        tdc_coincidenced_p3 = np.empty(0, dtype=np.int64)
-        tdc_coincidenced_mrsync = np.empty(0, dtype=np.int64)
+    tdc_coincidenced_p3 = np.empty(0, dtype=np.int64)
+    tdc_coincidenced_mrsync = np.empty(0, dtype=np.int64)
 
-        tdc_delayed = [(tdc - delay_i - i)
+    for i in delay_width:
+        delays_to_newhod = (i,) + delays_to_newhod[1:]
+        print(delays_to_newhod)
+
+        tdc_delayed = [(tdc - delay_i)
                        for delay_i in delays_to_newhod]
         # pre-calculate in order to avoid unnecessary repetition in the for statement
 
