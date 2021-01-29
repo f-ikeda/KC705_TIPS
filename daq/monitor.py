@@ -110,7 +110,7 @@ DELAY_BH2_TO_NEWHOD = 21
 DELAY_OLDHOD_TO_NEWHOD = 29
 # clock
 
-DELAY_WIDTH = [-1, 0, 1]
+DELAY_WIDTH = (-1, 0, 1)
 # 3 clock, +-1 and 0
 
 CLOCK_TIME = 5
@@ -195,8 +195,7 @@ def processing_tdc_overflow(tdc, index_header, index_footer):
 
     for array_i in index_overflow_and_footer:
         for index_k in range(len(array_i)-1):
-            tdc[array_i[index_k]: array_i[index_k+1]] = tdc[array_i[index_k]
-                : array_i[index_k+1]] + (index_k+1) * 2 ** 27
+            tdc[array_i[index_k]: array_i[index_k+1]] = tdc[array_i[index_k]: array_i[index_k+1]] + (index_k+1) * 2 ** 27
 
     return tdc
 
@@ -263,23 +262,24 @@ def intersect1d_alternative(array_foo, array_bar):
 
 def coincidence(conditions, delays_to_newhod, delay_width):
     # ----COINCIDENCE----
+    for i in DELAY_WIDTH:
 
-    tdc_coincidenced_p3 = np.empty(0, dtype=np.int64)
-    tdc_coincidenced_mrsync = np.empty(0, dtype=np.int64)
+        tdc_coincidenced_p3 = np.empty(0, dtype=np.int64)
+        tdc_coincidenced_mrsync = np.empty(0, dtype=np.int64)
 
-    tdc_delayed = [(tdc - delay_i)
-                   for delay_i in delays_to_newhod]
-    # pre-calculate in order to avoid unnecessary repetition in the for statement
+        tdc_delayed = [(tdc - delay_i - i)
+                       for delay_i in delays_to_newhod]
+        # pre-calculate in order to avoid unnecessary repetition in the for statement
 
-    for spill_k in list_spillcount:
-        # coincidence has to be considered for each spill independently
-        condition_spill_k = ((spillcount == spill_k) & ~
-                             condition_header & ~condition_footer)
+        for spill_k in list_spillcount:
+            # coincidence has to be considered for each spill independently
+            condition_spill_k = ((spillcount == spill_k) & ~
+                                 condition_header & ~condition_footer)
 
-        tdc_coincidenced_p3 = np.insert(tdc_coincidenced_p3, tdc_coincidenced_p3.size, reduce(
-            intersect1d_alternative, tuple([np.extract(condition_i_and_tdc_delayed_i[0] & condition_spill_k, condition_i_and_tdc_delayed_i[1]) for condition_i_and_tdc_delayed_i in zip(conditions, tdc_delayed)])))
-        tdc_coincidenced_mrsync = np.insert(tdc_coincidenced_p3, tdc_coincidenced_p3.size, reduce(
-            intersect1d_alternative, tuple([np.extract(condition_i_and_tdc_delayed_i[0] & condition_spill_k, condition_i_and_tdc_delayed_i[1] - mrsync) for condition_i_and_tdc_delayed_i in zip(conditions, tdc_delayed)])))
+            tdc_coincidenced_p3 = np.insert(tdc_coincidenced_p3, tdc_coincidenced_p3.size, reduce(
+                intersect1d_alternative, tuple([np.extract(condition_i_and_tdc_delayed_i[0] & condition_spill_k, condition_i_and_tdc_delayed_i[1]) for condition_i_and_tdc_delayed_i in zip(conditions, tdc_delayed)])))
+            tdc_coincidenced_mrsync = np.insert(tdc_coincidenced_p3, tdc_coincidenced_p3.size, reduce(
+                intersect1d_alternative, tuple([np.extract(condition_i_and_tdc_delayed_i[0] & condition_spill_k, condition_i_and_tdc_delayed_i[1] - mrsync) for condition_i_and_tdc_delayed_i in zip(conditions, tdc_delayed)])))
 
     return tdc_coincidenced_p3, tdc_coincidenced_mrsync
 
@@ -363,7 +363,7 @@ delays_to_newhod = (0, DELAY_BH1_TO_NEWHOD,
 # tdc_somedetector_p3 = np.extract(condition_somedetector, tdc)
 # tdc_somedetector_mrsync = np.extract(condition_somedetector, tdc - mrsync)
 tdc_coincidenced_p3, tdc_coincidenced_mrsync = coincidence(
-    conditions, delays_to_newhod, None)
+    conditions, delays_to_newhod, DELAY_WIDTH)
 # ##################################################################################
 
 TIME_ANALYZE_F = time.time()
