@@ -1,20 +1,20 @@
 import sys
+import os
+import glob
 
 import numpy as np
 from functools import partial, reduce
 
 from numba import jit
 
+import matplotlib as mp
 import matplotlib.pyplot as plt
 
 import time
 # for debug
 
 # ########DESCRIPTION########
-# USEAGE: $ python3 moniter.py how_many_spill_to_read path_to_beamOn-10shoot-20201217.dat
-#         $ python3 monitor.py 1 beamOn-10shoot-20201217.dat (1 spill)
-#         $ python3 monitor.py 2 beamOn-10shoot-20201217.dat (2 spill)
-#                                       :
+# USEAGE: $ python3 moniter.py path_to_directory
 #
 # INPUT: raw binary file, such as there are
 #        00000000000001000000000123 <- hit on detector
@@ -44,11 +44,10 @@ import time
 #           ANALYZING     ...
 #           DRAWING       ...drawing some plots
 #
-# ISSUES: コインシデンスに関して、widthを考慮するようにする必要がある(newhodのallorに対して、+-1,0の配列を用意するだけ)
-#         データの読み込み、定期的に(how?)ディレクトリの中にある最新のものを探して(globでおk)、勝手に読むようにする
-#         12月のデータで動作確認をしているため、HeaderとFooterの仕様が古い
-#         numbaで高速化を狙えることがわかった(64 bitまでしかいけないので、tdcに関してのみ？->sigで似たことをやろうと思うと、64+64など凝ったことをせねばならない)
-#         関数をnumbaで置き換えていく
+# ISSUES: Header, Footerが12月仕様
+#         遅い(描画に関してはPython便利、なので、いっそCで計算した結果を配列に格納するようにする、速度はダンチ
+#           　手順としては、numpy配列を用意しておいて、ポインタを渡して値を書き換え
+#             ただ、このコードのほとんどをリファクタリングするので、まとまった時間があるときにやりたい。。)
 #
 # 仕様: ファイル中に、HeaderとFooterとが、同数かつHeader,Footer,...,Header,Footerの順に、必ず1 組以上含まれていなければいけない
 #       ファイル中に、MR Syncが必ず1 つ以上含まれていなければいけない
@@ -133,8 +132,6 @@ def formatting_data(data_bytes):
 
 def processing_spillcount(data):
     # ----SPILLCOUNT----
-    TIME_SPILLCOUNT_S = time.time()
-
     condition_header = ((data & BITS_MASK_HEADER) == BITS_WORD_HEADER)
     # making the boolian mask
     condition_footer = ((data & BITS_MASK_FOOTER) == BITS_WORD_FOOTER)
@@ -150,21 +147,12 @@ def processing_spillcount(data):
         list_spillcount, np.diff(index_header[0], append=data.size))])
     # when there are no Header in file, index_header[0][0] causes an error
 
-    TIME_SPILLCOUNT_F = time.time()
-    print("(SPILLCOUNT TIME [s]: " +
-          str(TIME_SPILLCOUNT_F - TIME_SPILLCOUNT_S) + ')')
-
     return spillcount, index_header[0], index_footer[0], condition_header, condition_footer, list_spillcount
 
 
 def processing_sig(data):
     # ----SIG----
-    TIME_SIG_S = time.time()
-
     sig = (data & BITS_MASK_SIG) >> BITS_SIZE_TDC
-
-    TIME_SIG_F = time.time()
-    print("(SIG TIME [s]: " + str(TIME_SIG_F - TIME_SIG_S) + ')')
 
     return sig
 
@@ -195,8 +183,7 @@ def processing_tdc_overflow(tdc, index_header, index_footer):
 
     for array_i in index_overflow_and_footer:
         for index_k in range(len(array_i)-1):
-            tdc[array_i[index_k]: array_i[index_k+1]] = tdc[array_i[index_k]
-                : array_i[index_k+1]] + (index_k+1) * 2 ** 27
+            tdc[array_i[index_k]: array_i[index_k+1]] = tdc[array_i[index_k]                                                            : array_i[index_k+1]] + (index_k+1) * 2 ** 27
 
     return tdc
 
@@ -214,7 +201,7 @@ def processing_tdc(data, index_header, index_footer):
     return tdc
 
 
-def processing_mrsync():
+def processing_mrsync(sig, condition_header, condition_footer, tdc):
     # ----MR SYNC----
     condition_mrsync = ((sig & BITS_MASK_SIG_MRSYNC) != 0) & (
         ~condition_header) & (~condition_footer)
@@ -223,8 +210,8 @@ def processing_mrsync():
     list_mrsync = np.extract(condition_mrsync, tdc)
 
     mrsync = np.concatenate([np.full(index_mrsync[0][0], -1), np.repeat(
-        list_mrsync, np.diff(index_mrsync[0], append=data.size))])
-    # when there are no MR Sync data in file, index_mrsync[0][0] causes an error
+        list_mrsync, np.diff(index_mrsync[0], append=sig.size))])
+    # when there are no MR Sync sig in file, index_mrsync[0][0] causes an error
 
     return mrsync, condition_mrsync, list_mrsync
 
@@ -261,15 +248,13 @@ def intersect1d_alternative(array_foo, array_bar):
     return array_intersected[:index_k]
 
 
-def coincidence(conditions, delays_to_newhod, delay_width):
+def coincidence(spillcount, condition_header, condition_footer, list_spillcount, tdc, mrsync, conditions, delays_to_newhod, delay_width):
     # ----COINCIDENCE----
-
     tdc_coincidenced_p3 = np.empty(0, dtype=np.int64)
     tdc_coincidenced_mrsync = np.empty(0, dtype=np.int64)
 
     for i in delay_width:
         delays_to_newhod = (i,) + delays_to_newhod[1:]
-        print(delays_to_newhod)
 
         tdc_delayed = [(tdc - delay_i)
                        for delay_i in delays_to_newhod]
@@ -282,143 +267,153 @@ def coincidence(conditions, delays_to_newhod, delay_width):
 
             tdc_coincidenced_p3 = np.insert(tdc_coincidenced_p3, tdc_coincidenced_p3.size, reduce(
                 intersect1d_alternative, tuple([np.extract(condition_i_and_tdc_delayed_i[0] & condition_spill_k, condition_i_and_tdc_delayed_i[1]) for condition_i_and_tdc_delayed_i in zip(conditions, tdc_delayed)])))
-            tdc_coincidenced_mrsync = np.insert(tdc_coincidenced_p3, tdc_coincidenced_p3.size, reduce(
-                intersect1d_alternative, tuple([np.extract(condition_i_and_tdc_delayed_i[0] & condition_spill_k, condition_i_and_tdc_delayed_i[1] - mrsync) for condition_i_and_tdc_delayed_i in zip(conditions, tdc_delayed)])))
+            tdc_coincidenced_mrsync = np.insert(tdc_coincidenced_mrsync, tdc_coincidenced_mrsync.size, reduce(
+                np.intersect1d, tuple([np.extract(condition_i_and_tdc_delayed_i[0] & condition_spill_k, condition_i_and_tdc_delayed_i[1] - mrsync) for condition_i_and_tdc_delayed_i in zip(conditions, tdc_delayed)])))
 
     return tdc_coincidenced_p3, tdc_coincidenced_mrsync
 
 
+def analyzing(spillcount, condition_header, condition_footer, list_spillcount, sig, tdc, mrsync):
+    # --------ANALYZING--------
+    # ########Write the analysis code here using sig, tdc, mrsync and spillcount########
+    # condition_somedetector = bit-calc.(sig)
+    condition_newhod_allor = ((sig & BITS_MASK_SIG_NEWHOD_ALLOR)
+                              != 0) & ~condition_header & ~condition_footer
+    condition_bh1 = ((sig & BITS_MASK_SIG_BH1)
+                     != 0 & ~condition_header & ~condition_footer)
+    condition_bh2 = ((sig & BITS_MASK_SIG_BH2)
+                     != 0 & ~condition_header & ~condition_footer)
+    condition_oldhod_allor = ((sig & BITS_MASK_SIG_OLDHOD_ALLOR)
+                              != 0 & ~condition_header & ~condition_footer)
+
+    conditions = (condition_newhod_allor, condition_bh1,
+                  condition_bh2, condition_oldhod_allor,)
+    delays_to_newhod = (0, DELAY_BH1_TO_NEWHOD,
+                        DELAY_BH2_TO_NEWHOD, DELAY_OLDHOD_TO_NEWHOD)
+
+    # tdc_somedetector_p3 = np.extract(condition_somedetector, tdc)
+    # tdc_somedetector_mrsync = np.extract(condition_somedetector, tdc - mrsync)
+    tdc_coincidenced_p3, tdc_coincidenced_mrsync = coincidence(spillcount, condition_header, condition_footer, list_spillcount, tdc, mrsync,
+                                                               conditions, delays_to_newhod, DELAY_WIDTH)
+    # ##################################################################################
+
+    return tdc_coincidenced_p3, tdc_coincidenced_mrsync
+
+
+def decoding(path_to_file):
+    # --------READING--------
+    with open(path_to_file, 'rb') as file:
+        data_bytes = file.read()
+
+    data = formatting_data(data_bytes)
+
+    # --------PROCESSING--------
+    # ----SPILLCOUNT----
+    spillcount, index_header, index_footer, condition_header, condition_footer, list_spillcount = processing_spillcount(
+        data)
+    # ----SIG----
+    sig = processing_sig(data)
+    # ----TDC----
+    tdc = processing_tdc(data, index_header, index_footer)
+    # ----MR SYNC----
+    mrsync, condition_mrsync, list_mrsync = processing_mrsync(
+        sig, condition_header, condition_footer, tdc)
+
+    # --------ANALYZING--------
+    tdc_coincidenced_p3, tdc_coincidenced_mrsync = analyzing(
+        spillcount, condition_header, condition_footer, list_spillcount, sig, tdc, mrsync)
+
+    return tdc_coincidenced_p3, tdc_coincidenced_mrsync
+
+
+class plotter(object):
+
+    def __init__(self):
+        self.fig = plt.figure(figsize=(10, 8))
+        # 画面サイズ
+        self.initializer()
+
+    def initializer(self):
+        self.fig.suptitle('monitor', size=10)
+        # タイトルと文字サイズ
+        self.fig.subplots_adjust(
+            left=0.10, right=0.90, top=0.90, bottom=0.1, wspace=0.4, hspace=0.4)
+        # グラフ全体としての画面端との余白(左,右,上,下), 各グラフ間の余白(左右,上下)
+        self.ax_mrsync = plt.subplot2grid((2, 1), (0, 0))
+        # 画面の分割数(行,列), そのグラフの置き場(通し番号)
+        self.ax_p3 = plt.subplot2grid((2, 1), (1, 0))
+
+        self.ax_mrsync.grid(True)
+        # プロット中のマス目の有無
+        self.ax_p3.grid(True)
+
+        self.ax_mrsync.set_title('from MR Sync')
+        # タイトル
+        self.ax_p3.set_title('from P3')
+
+        self.ax_mrsync.set_xlabel('x')
+        # x軸のラベル
+        self.ax_mrsync.set_ylabel('y')
+
+        self.lines_mrsync = self.ax_mrsync.hist([-1, -1], label='from MR Sync')
+        self.lines_p3 = self.ax_p3.hist([-1, -1], label='from P3')
+        # プロットの初期化
+
+    def reloader(self, data_array_mrsync, data_array_p3):
+        # 更新ごとにあれこれ設定
+
+        self.ax_mrsync.cla()
+        self.ax_mrsync.set_title('from MR Sync')
+        self.ax_mrsync.grid(True)
+        self.lines_mrsync = self.ax_mrsync.hist(data_array_mrsync*CLOCK_TIME*pow(
+            10, -3), bins=250, histtype='step', log=True, label='from MR Sync')
+        self.ax_mrsync.set_ylim(0.1, None)
+        self.ax_mrsync.legend(loc='upper right')
+
+        self.ax_p3.cla()
+        self.ax_p3.set_title('from P3')
+        self.ax_p3.grid(True)
+        self.lines_p3 = self.ax_p3.hist(
+            data_array_p3*CLOCK_TIME*pow(10, -9), bins=250, histtype='step', log=True, label='from P3')
+        self.ax_p3.set_ylim(0.1, None)
+        self.ax_p3.legend(loc='upper right')
+
+    def pause(self, second):
+        plt.pause(second)
+
+
+def finder(path_to_directory):
+    # 最新から二番目を拾ってくる
+    list_of_files = glob.glob(path_to_directory+'*')
+    latest_two_file = sorted(
+        list_of_files, key=os.path.getctime, reverse=True)[:2]
+
+    if(len(latest_two_file[1:2]) > 0):
+        path_to_file = latest_two_file[1]
+        return path_to_file
+    else:
+        return ''
+
+
 argument = sys.argv
-if(len(argument) != 3):
+if(len(argument) != 2):
     print(argument)
-    print('$ python3 moniter.py how_many_spill_to_read path_to_beamOn-10shoot-20201217.dat')
+    print('$ python3 moniter.py path_to_directory')
     sys.exit()
 
-file_path = argument[2]
-file = open(file_path, 'rb')
+path_to_directory = argument[1]
 
-file.read(DATA_UNIT)
-# beamOn-10shoot-20201217.datを用いるために、ファイル冒頭のフッターを読み飛ばす
-# $ python3 monitor.py 3580598 beamOn-10shoot-20201217.dat (1 spill)
-# $ python3 monitor.py 7177025 beamOn-10shoot-20201217.dat (2 spill)
-#                               :
-# header: 0       3580598 7177025  10808540 14407270 18044246 21633446 25225710 28865318 32431605
-# footer: 3580597 7177024 10808539 14407269 18044245 21633445 25225709 28865318 32431604 欠損？
-
-data_num = {1: 3580598, 2: 7177025, 3: 10808540, 4: 14407270,
-            5: 18044246, 6: 21633446, 7: 25225710, 8: 28865318, 9: 32431605}
-spill_num = int(argument[1])
-
-print('-------- TIME --------')
-# --------READING--------
-TIME_READ_S = time.time()
-
-data_bytes = file.read(DATA_UNIT * data_num[spill_num])
-
-TIME_READ_F = time.time()
-print("READ TIME [s]: " + str(TIME_READ_F - TIME_READ_S))
-
-# --------FORMATTING--------
 bytes_to_int_universal = np.frompyfunc(bytes_to_int, 1, 1)
 # converting function to universal function
 
-TIME_FORMAT_S = time.time()
+PLOTTER = plotter()
+while (True):
+    while(len(finder(path_to_directory)) == 0):
+        time.sleep(0.3)
 
-data = formatting_data(data_bytes)
+    path_to_file = finder(path_to_directory)
+    # 仮にP3周期よりも早く描き切った場合、同じ処理が回るので、よくない書き方(残念ながらそんなことないと思うが)
+    tdc_coincidenced_p3, tdc_coincidenced_mrsync = decoding(path_to_file)
 
-TIME_FORMAT_F = time.time()
-print("FORMAT TIME [s]: " + str(TIME_FORMAT_F - TIME_FORMAT_S))
-
-# --------PROCESSING--------
-TIME_PROCESS_S = time.time()
-
-# ----SPILLCOUNT----
-spillcount, index_header, index_footer, condition_header, condition_footer, list_spillcount = processing_spillcount(
-    data)
-# ----SIG----
-sig = processing_sig(data)
-# ----TDC----
-tdc = processing_tdc(data, index_header, index_footer)
-# ----MR SYNC----
-mrsync, condition_mrsync, list_mrsync = processing_mrsync()
-
-TIME_PROCESS_F = time.time()
-print("PROCESS TIME [s]: " + str(TIME_PROCESS_F - TIME_PROCESS_S))
-
-# --------ANALYZING--------
-TIME_ANALYZE_S = time.time()
-
-# ########Write the analysis code here using sig, tdc, mrsync and spillcount########
-# condition_somedetector = bit-calc.(sig)
-condition_newhod_allor = ((sig & BITS_MASK_SIG_NEWHOD_ALLOR)
-                          != 0) & ~condition_header & ~condition_footer
-condition_bh1 = ((sig & BITS_MASK_SIG_BH1)
-                 != 0 & ~condition_header & ~condition_footer)
-condition_bh2 = ((sig & BITS_MASK_SIG_BH2)
-                 != 0 & ~condition_header & ~condition_footer)
-condition_oldhod_allor = ((sig & BITS_MASK_SIG_OLDHOD_ALLOR)
-                          != 0 & ~condition_header & ~condition_footer)
-
-conditions = (condition_newhod_allor, condition_bh1,
-              condition_bh2, condition_oldhod_allor,)
-delays_to_newhod = (0, DELAY_BH1_TO_NEWHOD,
-                    DELAY_BH2_TO_NEWHOD, DELAY_OLDHOD_TO_NEWHOD)
-
-# tdc_somedetector_p3 = np.extract(condition_somedetector, tdc)
-# tdc_somedetector_mrsync = np.extract(condition_somedetector, tdc - mrsync)
-tdc_coincidenced_p3, tdc_coincidenced_mrsync = coincidence(
-    conditions, delays_to_newhod, DELAY_WIDTH)
-# ##################################################################################
-
-TIME_ANALYZE_F = time.time()
-print("ANALYZE TIME [s]: " + str(TIME_ANALYZE_F - TIME_ANALYZE_S))
-
-# --------DRAWING--------
-TIME_DRAW_S = time.time()
-
-fig = plt.figure()
-ax = fig.add_subplot(1, 1, 1)
-
-ax.hist(tdc_coincidenced_p3*CLOCK_TIME*pow(10, -9),
-        bins=250, histtype='step', log=True)
-ax.set_ylim(0.1, None)
-
-TIME_DRAW_F = time.time()
-
-print("DRAW TIME [s]: " + str(TIME_DRAW_F - TIME_DRAW_S))
-plt.show()
-
-# chマップをみたいなら、ここに書く
-# condition_ch_i = bit-calc.(sig)
-# hit_num = np.sum(condition_i)
-# fig_chmap =
-
-'''
-
-
-print('-------- DEBUG --------')
-print('data.dtype: ' + str(data.dtype))
-print('sig.dtype: ' + str(sig.dtype))
-print('tdc.dtype: ' + str(tdc.dtype))
-print('sig.size: ' + str(sig.size))
-print('tdc.size: ' + str(tdc.size))
-print('mrsync.size: ' + str(mrsync.size))
-print('spillcount.size: ' + str(spillcount.size))
-print('mrsync: ' + str(mrsync))
-print('spillcount: ' + str(spillcount))
-print('list_mrsync: ' + str(list_mrsync))
-print('list_spillcount: ' + str(list_spillcount))
-print('np.unique(mrsync).size: ' +
-      str(np.unique(mrsync).size))
-print('np.unique(spillcount).size: ' +
-      str(np.unique(spillcount).size))
-print('np.unique(mrsync, return_index=True)[1]: ' + str(
-    np.unique(mrsync, return_index=True)[1]))
-print('np.unique(spillcount, return_index=True)[1]: ' + str(
-    np.unique(spillcount, return_index=True)[1]))
-print('index_header[0]: ' + str(index_header[0]))
-print('index_footer[0]: ' + str(index_footer[0]))
-print('index_mrsync[0]: ' + str(index_mrsync[0]))
-'''
-
-file.close()
+    PLOTTER.reloader(tdc_coincidenced_mrsync, tdc_coincidenced_p3)
+    PLOTTER.pause(0.1)
