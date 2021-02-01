@@ -28,7 +28,7 @@ def Case1():
                     continue
                 else:
                     # つまりコインシデンスが取れたとき
-                    coincidenced.append(tdc[index_A] - mrsync[index_A])
+                    coincidenced.append(tdc_A_latest - mrsync[index_A])
                     mrsync_tmp.append(mrsync[index_A])
                     index_A += 1
                     index_B += 1
@@ -52,7 +52,7 @@ def Case1():
 
 
 def coincidence(tuple_tdc_A_and_mrsync_A, tuple_tdc_B_and_mrsync_B):
-    # Case1を下敷きに、再起処理のできるよう関数化
+    # Case1()を下敷きに、再帰処理のできるよう関数化
     # 重要なのは、インデックスの対応はあくまでAとBとで独立に満たせば十分ということ
     # 従って、入力: (tdc(A),mrsync(A)),(tdc(B),mrsync(B))
     # とし、出力: (tdc(coincidenced),mrsync(coincidenced))
@@ -64,11 +64,19 @@ def coincidence(tuple_tdc_A_and_mrsync_A, tuple_tdc_B_and_mrsync_B):
     tdc_coincidenced = []
     mrsync_coincidenced = []
 
-    index_A = 0
-    index_B = 0
-    while index_A < len(tuple_tdc_A_and_mrsync_A[0]) or index_B < len(tuple_tdc_B_and_mrsync_B[0]):
-        tdc_A_latest = tuple_tdc_A_and_mrsync_A[0][index_A]
-        tdc_B_latest = tuple_tdc_B_and_mrsync_B[0][index_B]
+    tdc_A = tuple_tdc_A_and_mrsync_A[0]
+    mrsync_A = tuple_tdc_A_and_mrsync_A[1]
+    tdc_B = tuple_tdc_B_and_mrsync_B[0]
+    mrsync_B = tuple_tdc_B_and_mrsync_B[1]
+
+    print('tdc_A: ' + str(tdc_A))
+    print('tdc_B: ' + str(tdc_B))
+    print('mrsync_A: ' + str(mrsync_A))
+    print('mrsync_B: ' + str(mrsync_B))
+
+    for index_A, index_B in zip(range(len(tdc_A)), range(len(tdc_B))):
+        tdc_A_latest = tdc_A[index_A]
+        tdc_B_latest = tdc_B[index_B]
 
         diff_B_A = tdc_B_latest - tdc_A_latest
         if(diff_B_A < DELAY):
@@ -80,8 +88,8 @@ def coincidence(tuple_tdc_A_and_mrsync_A, tuple_tdc_B_and_mrsync_B):
         else:
             # つまりコインシデンスが取れたとき
             tdc_coincidenced.append(
-                tuple_tdc_A_and_mrsync_A[0][index_A] - tuple_tdc_A_and_mrsync_A[1][index_A])
-            mrsync_coincidenced.append(tuple_tdc_A_and_mrsync_A[1][index_A])
+                tdc_A_latest - mrsync_A[index_A])
+            mrsync_coincidenced.append(mrsync_A[index_A])
             index_A += 1
             index_B += 1
             continue
@@ -131,4 +139,3 @@ tdc_B = np.extract(condition_B, tdc).tolist()
 mrsync_A = np.extract(condition_A, mrsync).tolist()
 mrsync_B = np.extract(condition_B, mrsync).tolist()
 coincidence((tdc_A, mrsync_A), (tdc_B, mrsync_B))
-# 引数の渡し方に問題あるっぽい
