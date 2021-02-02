@@ -1,313 +1,302 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Dec  8 01:12:35 2020
+import sys
 
-@author: f-ikeda
-"""
-"""
-#TODO
-データの型は問題ないか、特にsig_dataに関して
-CHを見やすくする！
-高速化
-"""
-"""
-#データ
-spillcount_data: ndarray, スピルカウントの値(int)のつまった配列
-eventmatching_data: ndarray, イベントマッチングの値(int)のつまった配列
-tdc_data: ndarray, TDCの値(int)のつまった配列
-sig_data: ndarray, SIGの値(int)のつまった配列
-eventnum_data: ndarray, スピルごとのTDCした回数(int)のつまった配列
-
-i,nともに0始まりであることに注意！
-"""
-
-
-import os
 import numpy as np
 
-#for debug
+from numba import jit
+
+import matplotlib as mp
 import matplotlib.pyplot as plt
 
+# ########DESCRIPTION########
+# USEAGE: $ python3 moniter.py path_to_directory
+#
+# INPUT: raw binary file, such as there are
+#        00000000000001000000000123 <- hit on detector
+#        ABB00012345670123456703272 <- Header
+#        0000000000000000000800012a <- hit on MR Sync
+#        00000000100000000000000450 <- hit on detector
+#        00000000000010000000000541 <- hit on detector
+#        00000010000000100000000711 <- hit on detector
+#        00000000000000000008000957 <- hit on MR Sync
+#        00000000000100000000000601 <- hit on detector
+#        00000FEE00AAAAAAAAAAAAAAAA <- Footer
+#        ABB00012345670123456703273 <- Header
+#        00000000100000000000000123 <- hit on detector
+#        00000000001000000008000340 <- hit on MR Sync and detector
+#        00010000000000000000000601 <- hit on detector
+#        00000FEE00AAAAAAAAAAAAAAAA <- Footer
+#        01000000000000000000000111 <- hit on detector
+#
+# OUTPUT ARRAY: sig        = [                            sig of all the corresponding tdc data                            ]
+#               tdc        = [123, header's, 12a, 450, 541, 711, 957, 601, footer's, header's, 123, 340, 601, footer's, 111]
+#               mrsync     = [-1,        -1, 12a, 12a, 12a, 12a, 957, 957,      957,      957, 957, 340, 340,      340, 340]
+#               spillcount = [-1,      3272,3272,3272,3272,3272,3272,3272,     3272,     3273,3273,3273,3273,     3273,3273]
+#
+# OVERVIEW: READING       ...reading a byte sequence
+#           FORMATTING    ...converting a sequence of bytes into an array with elements of 13-byte
+#           PROCCESING    ...creating an array of sig, tdc, mrsync and spillcount
+#           ANALYZING     ...
+#           DRAWING       ...drawing some plots
+#
+# ISSUES:
+#
+# 仕様: ファイル中に、HeaderとFooterとが、同数かつHeader,Footer,...,Header,Footerの順に、必ず1 組以上含まれていなければいけない
+#       ファイル中に、MR Syncが必ず1 つ以上含まれていなければいけない
+#       Headerよりも後、かつ、MR Syncよりも前にイベントがあった場合、mrsyncに前回のスピルの最後のMR Syncの値を割り当てる
 
-def data_in_spill_i(data,eventnum_data,i):
-    #input: data = tdc_data or sig_data, i
-    #output: tdc_data or sig_dataのうち、i番目のスピルに属するものだけを取り出した部分列ndarray
-    #i番目のスピルに属するtdc_data or sig_dataの要素数: eventnum_data[i]
-    #i番目まで(i番目含む)のスピルに属するtdc_data or sig_dataの要素数: np.sum(eventnum_data[:i+1])
-    
-    #tdc_data = [1,2,|4,3,5,|1,4,3,3|2,1]
-    #eventnum_data = [2,3,4,2]
-    #このとき、2番目のスピルに属するtdc_dataの値は4個(1,4,3,3)
-    #初めの値1と終わりの値3を指定するインデックスは、
-    #初めの値1について、eventnum_data[0]+eventnum_data[1]=2+3=5
-    #終わりの値3について、eventnum_data[0]+eventnum_data[1]+eventnum_data[2]-1=2+3+4-1=9-1(=8)
-    
-    return data[np.sum(eventnum_data[:i]):np.sum(eventnum_data[:i+1])]
+DATA_UNIT = 13
+# bytes
+# DIN    <= {HEADER[31:0],SPLCOUNT[15:0],4'd0,BOARD_ID[3:0],48'h0123_4567_89AB}; // HEADER =  REG_HEADER[31:0]
+#            x08_Reg[7:0]    <= 8'h01;   // Header
+#            x09_Reg[7:0]    <= 8'h23;   // Header
+#            x0A_Reg[7:0]    <= 8'h45;   // Header
+#            x0B_Reg[7:0]    <= 8'h67;   // Header
+# DIN    <= {FOOTER[31:0],SPLCOUNT[15:0],EMCOUNT[15:0],wrCnt[31:0],8'hAB}; // FOOTER = REG_FOOTER[31:0]
+#            x0C_Reg[7:0]    <= 8'hAA;   // Footer
+#            x0D_Reg[7:0]    <= 8'hAA;   // Footer
+#            x0E_Reg[7:0]    <= 8'hAA;   // Footer
+#            x0F_Reg[7:0]    <= 8'hAA;   // Footer
+# DIN    <= {SIG[76:0],COUNTER[26:0]}; // 104-bits
+# {MainHodo[63:0],PMR[11:0],MR_Sync,COUNTER[26:0]}
+BITS_SIZE_SIG = 77
+# bits
+BITS_SIZE_SIG_MRSYNC = 1
+# bits
+BITS_SIZE_SIG_PMT = 12
+# bits
+BITS_SIZE_SIG_NEWHOD = 64
+# bits
+BITS_SIZE_TDC = 27
+# bits
+BITS_SIZE_BOARDID = 4
+# bits
+BITS_SIZE_SPILLCOUNT = 16
+# bits
+BITS_SIZE_EMCOUNT = 16
+# bits
+BITS_SIZE_WRITECOUNT = 32
+# bits
+BITS_SIZE_HEADER_UPPER = 32
+# bits
+BITS_SIZE_HEADER_LOWER = 48
+# bits
+BITS_SIZE_FOOTER_UPPER = 32
+# bits
+BITS_SIZE_FOOTER_LOWER = 8
+# bits
 
-def hitlist_data_in_spill_i_ch_n(sig_data,eventnum_data,i,n):
-    #input: sig_data, i, n
-    #output: i番目のスピルに属するsig_dataのうち、n番目のCHにヒットのある要素のインデックス一覧
-    #i番目のスピルに属するsig_dataの部分列を、ビットシフトを行うために十分な型に変更
-    sig_data_in_spill_i_uint64 = data_in_spill_i(sig_data,eventnum_data,i).astype(np.uint64)
-    #i番目のスピルに属するsig_dataの部分列のうち、n桁目のフラグが立っている要素のインデックスを取得
-    #n桁目のフラグだけ立っているビット: 1<<(n-1)
-    #n桁目のフラグが立っているか: if bit & (1<<(n-1)):
-    #0番目のchについては1桁目を、n番目のchについてはn+1桁目を見る必要がある
-    output = np.where(((sig_data_in_spill_i_uint64)&(1<<(n+1-1)))==(1<<(n+1-1)))
-    
-    return output[0]
+BITS_WORD_HEADER_UPPER = (0x01234567 << (
+    BITS_SIZE_SPILLCOUNT + 4 + BITS_SIZE_BOARDID + BITS_SIZE_HEADER_LOWER))
+# use with just ==, on raw(104 bits) data
+BITS_WORD_HEADER_LOWER = 0x0123456789AB
+# use with just ==, on raw(104 bits) data
+BITS_WORD_FOOTER_UPPER = (0xAAAAAAAA << (
+    BITS_SIZE_SPILLCOUNT + BITS_SIZE_EMCOUNT + BITS_SIZE_WRITECOUNT + BITS_SIZE_FOOTER_LOWER))
+# use with just ==, on raw(104 bits) data
+BITS_WORD_FOOTER_LOWER = 0xAB
+# use with just ==, on raw(104 bits) data
 
-def hittimes_data_in_spill_i(sig_data,eventnum_data,i):
-    #input: sig_data, eventnum_data, i
-    #output: i番目のスピルに関して、インデックスnにn番目のCHへのヒット数が格納されたndarray
-    #outputとなるndarray
-    output = np.empty(0,dtype=np.int8)
-    for n in range(0,all_ch):
-        #i番目のスピルに属するデータのうち、n番目のCHにはhitlist_data_in_spill_i_ch_nの全要素数個のヒットがあるためappend
-        #(インデックス0番目の要素は、0 CHにヒットした個数となる)
-        output = np.append(output,hitlist_data_in_spill_i_ch_n(sig_data,eventnum_data,i,n).size)
-        
-    return output
+BITS_MASK_HEADER_UPPER = ((2 ** BITS_SIZE_HEADER_UPPER - 1) <<
+                          (BITS_SIZE_SPILLCOUNT + 4 + BITS_SIZE_BOARDID + BITS_SIZE_HEADER_LOWER))
+# 104 bits, only the upper BITS_SIZE_HEADER_UPPER bit is filled with 1
+BITS_MASK_HEADER_LOWER = 2 ** BITS_SIZE_HEADER_LOWER - 1
+# 104 bits, only the lower BITS_SIZE_HEADER_LOWER bit is filled with 1
+BITS_MASK_FOOTER_UPPER = ((2 ** BITS_SIZE_FOOTER_UPPER - 1) << (BITS_SIZE_SPILLCOUNT +
+                                                                BITS_SIZE_EMCOUNT + BITS_SIZE_WRITECOUNT + BITS_SIZE_FOOTER_LOWER))
+# 104 bits, only the upper BITS_SIZE_FOOTER_UPPER bit is filled with 1
+BITS_MASK_FOOTER_LOWER = 2 ** BITS_SIZE_FOOTER_LOWER - 1
+# 104 bits, only the lower BITS_SIZE_FOOTER_LOWER bit is filled with 1
+BITS_MASK_SPILLCOUNT = (2 ** BITS_SIZE_SPILLCOUNT - 1 <<
+                        (4 + BITS_SIZE_BOARDID + BITS_SIZE_HEADER_LOWER))
+# 104 bits, only the corresponding BITS_SIZE_SPILLCOUNT bit is filled with 1
+BITS_MASK_SIG = (2 ** BITS_SIZE_SIG - 1) << BITS_SIZE_TDC
+# 104 bits, only the upper BITS_SIZE_SIG bit is filled with 1
+BITS_MASK_TDC = 2 ** BITS_SIZE_TDC - 1
+# 104 bits, only the lower BITS_SIZE_TDC bit is filled with 1
 
-def tdcdata_in_spill_i_ch_n(tdc_data,sig_data,eventnum_data,i,n):
-    #input: tdc_data, sig_data, eventnum_data, i, n
-    #output: i番目のスピルに属するtdc_dataの部分列のうち、n番目のCHへのヒットがあったものだけを取り出した部分列ndarray
-    output = np.empty(0,dtype=np.int8)
-        #i番目のスピルに属するsig_dataのうち、n番目のCHにヒットのある要素のインデックス一覧
-        #i番目のスピルに属するtdc_dataのうち、このインデックスで指定される要素が、output
-    for k in hitlist_data_in_spill_i_ch_n(sig_data,eventnum_data,i,n):
-        output = np.append(output,data_in_spill_i(tdc_data,eventnum_data,i)[k])
-    
-    return output
+BITS_MASK_SIG_NEWHOD_ALLOR = (2 ** BITS_SIZE_SIG_NEWHOD - 1) - \
+    (2 ** (BITS_SIZE_SIG_MRSYNC + BITS_SIZE_SIG_PMT) - 1)
+# 77 bits, only the upper BIT_SIZE_SIG_NEWHOD bit is filled with 1
+BITS_MASK_SIG_BH1 = 0b0010
+BITS_MASK_SIG_BH2 = 0b0100
+BITS_MASK_SIG_OLDHOD_ALLOR = 0b1000
+BITS_MASK_SIG_MRSYNC = 2 ** BITS_SIZE_SIG_MRSYNC - 1
+# 77 bits, only the lower BIT_SIZE_SIG_MRSYNC bit is filled with 1
+
+DELAY_BH1_TO_NEWHOD = 20
+# clock
+DELAY_BH2_TO_NEWHOD = 21
+# clock
+DELAY_OLDHOD_TO_NEWHOD = 29
+# clock
+
+DELAY_WIDTH = (-1, 0, 1)
+# 3 clock, +-1 and 0
+
+CLOCK_TIME = 5
+# ns
+
+DATA_TYPE = np.dtype((np.void, DATA_UNIT))
 
 
-#path to binary file
-path = "/Users/f-ikeda/EXdata/KC705/chain_gray_cable.data"
-#open binary file as read only mode
-file = open(path,"rb")
-#get file size which should be multiples of data_unit
-file_size = os.path.getsize(path)
-print("file_size: "+str(file_size))
-#size of file which already read
-readed_size = 0
-#data unit of KC705 in terms of byte
-data_unit = 13
+def bytes_to_int(DEADBEEF):
+    return int.from_bytes(DEADBEEF, 'big')
+    # 遅い！
 
-#1 clock needs 5 ns
-clock_time = 5e-9
-#all 77 channels
-all_ch = 77
 
-#header as str (10 byte)
-header = "abb00012345670123456"
-header = bytes.fromhex(header)
-#footer as str (11 byte)
-footer = "0fee00aaaaaaaaaaaaaaaa"
-footer = bytes.fromhex(footer)
+def formatting_data(data_bytes):
+    data = np.frombuffer(data_bytes, DATA_TYPE)
+    data = bytes_to_int_universal(data)
 
-#initialization of a header data
-spillcount_data = np.empty(0,dtype=np.int8)
-#initialization of a footer data
-eventmatching_data = np.empty(0,dtype=np.int8)
-#initialization of sig data
-sig_data = np.empty(0,dtype=np.int64)
-#initialization of tdc data
-tdc_data = np.empty(0,dtype=np.int32)
-#initialization of event number data
-eventnum_data = np.empty(0,dtype=np.int64)
+    return data
 
-#最初の13 byteを読み飛ばす
-#a = file.read(data_unit)
 
-while not file.tell() == file_size:
-    
-    #whether footer is read or not
-    footer_flag = 0
-    #initialization of event number
-    eventnum = 0
-    
-    #read data of data_unit byte until footer comes
-    while not footer_flag:
-        #要素数13で、1 byteごとに格納
-        data_flagment = file.read(data_unit)
-        readed_size += data_unit
-        print("file.tell(): "+str(file.tell()))
-        
-        #上位10 byte分で比較
-        if data_flagment[:len(header)] == header:
-            #下位2 byte分が欲しい
-            spillcount_data = np.append(spillcount_data,int.from_bytes(data_flagment[11:],"big"))
-        
-        #下位11 byte分で比較
-        elif data_flagment[-len(footer):] == footer:
-            #上位2 byte分が欲しい
-            eventmatching_data = np.append(eventmatching_data,int.from_bytes(data_flagment[:2],"big"))
-            footer_flag = 1
-            
-            #フッターの抜けや、ファイルサイズが13バイトの倍数じゃないとき
-            #break
-         
-        else:
-            #上位77 bit分が欲しいから、上位80 bit(10 byte)分をとり、その中の下位3 bit分を捨てるため右シフト
-            sig_data = np.append(sig_data,int.from_bytes(data_flagment[:10],"big")>>3)
-            #下位27 bit分が欲しいから、下位32 bit(4 byte)分をとり、その中の上位5 bit分を捨てるため、上位5 bitが0で下位27 bitが1の2^27-1と&
-            tdc_data = np.append(tdc_data,int.from_bytes(data_flagment[9:],"big")&(pow(2,27)-1))
+def processing_spillcount(data):
+    # ----SPILLCOUNT----
+    condition_header = ((data & (BITS_MASK_HEADER_UPPER | BITS_MASK_HEADER_LOWER)) == (
+        BITS_WORD_HEADER_UPPER | BITS_WORD_HEADER_LOWER))
+    # making the boolian mask
+    condition_footer = ((data & (BITS_MASK_FOOTER_UPPER | BITS_MASK_FOOTER_LOWER)) == (
+        BITS_WORD_FOOTER_UPPER | BITS_WORD_FOOTER_LOWER))
+    # making the boolian mask
+    index_header = np.where(condition_header)
+    # getting the position of the Header
+    index_footer = np.where(condition_footer)
+    # getting the position of the Footer
+    list_spillcount = (np.extract(condition_header, data)
+                       & BITS_MASK_SPILLCOUNT)
+    # getting the list of the Spillcount
+    spillcount = np.concatenate([np.full(index_header[0][0], -1), np.repeat(
+        list_spillcount, np.diff(index_header[0], append=data.size))])
+    # when there are no Header in file, index_header[0][0] causes an error
 
-            eventnum += 1
-        
-    eventnum_data = np.append(eventnum_data,eventnum)
-    
-    #フッターの抜けや、ファイルサイズが13バイトの倍数じゃないとき
-    #break
-    
-    #data format
-    #each of data is 13 byte(104 bit)
-    
-    #about header
-    #20 bit: A_BB_00
-    #32 bit:HEADER
-    #32 bit: HEADER
-    #4 bit: BOARD_ID
-    #16 bit: SPLCOUNT
-    
-    #in terms of byte
-    #01[AB]23[B0]45[00]67[12]89[34]1011[56]1213[70]1415[12]1617[34]1819[56]2021[7BOARD_ID]2223[SPLCOUNT]2425[SPLCOUNT]
-    
-    #about TDC data
-    #77 bit: SIG
-        #64 bit: MainHodo
-        #12 bit: PMT
-        #1 bit: MR_Sync
-    #27 bit: COUNTER
-    
-    #about footer
-    #16 bit: EMCOUNT
-    #4 bit: 0
-    #20 bit: F_EE_00
-    #32 bit: FOOTER
-    #32 bit: FOOTER
-    
-    #in terms of byte
-    #01[EMCOUNT]23[EMCOUNT]45[0F]67[EE]89[00]1011[AA]1213[AA]1415[AA]1617[AA]1819[AA]2021[AA]2223[AA]2425[AA]
+    return spillcount, index_header[0], index_footer[0], condition_header, condition_footer, list_spillcount
 
-#close binary file
-file.close()
 
-"""
-#解析コードは以下に書く
-"""
+def processing_sig(data):
+    # ----SIG----
+    sig = (data & BITS_MASK_SIG) >> BITS_SIZE_TDC
 
-"""
-#スピルごとのイベント数
-plt.title("Events Number")
-plt.xlabel("Spill Number")
-plt.ylabel("Entry")
-plt.scatter(spillcount_data,eventnum_data)
-#"""
+    return sig
 
-"""
-#i=2番目のスピルについて、TDCのクロックの値
-i=2
-plt.title("TDC Values")
-plt.xlabel("Clock Counts")
-plt.ylabel("Entry")
-plt.hist(data_in_spill_i(tdc_data,eventnum_data,i))
-#"""
 
-"""
-#i=2番目のスピルについて、TDCのクロックの値の間隔
-i=2
-plt.title("TDC diff")
-plt.xlabel("Clock Counts")
-plt.ylabel("Entry")
-edges = np.arange(np.diff(data_in_spill_i(tdc_data,eventnum_data,i),n=1).min(),np.diff(data_in_spill_i(tdc_data,eventnum_data,i),n=1).max())
-plt.hist(np.diff(data_in_spill_i(tdc_data,eventnum_data,i),n=1),bins=edges,histtype="step",log=True)
-#"""
+@ jit('i8[:](i8[:],i8[:],i8[:])', nopython=True)
+# i8[:] means np.iint64's array
+def processing_tdc_overflow(tdc, index_header, index_footer):
+    # ----TDC CLOCK COUNT OVERFLOW----
+    index_header_and_footer = np.dstack((index_header, index_footer))
 
-"""
-#全てのスピルについて、TDCのクロックの値の間隔
-plt.title("TDC diff")
-plt.xlabel("Clock Counts")
-plt.ylabel("Entry")
-y = np.empty(0,dtype=np.int32)
-#スピルの数は全部でspillcount_dataの要素数個
-for i in range(spillcount_data.size):
-    y = np.append(y,np.diff(data_in_spill_i(tdc_data,eventnum_data,i),n=1))
-edges = np.arange(y.min(),y.max())
-plt.hist(y,bins=edges,histtype="step",log=True)
-#"""
+    index_within_a_spill = [tdc[array_i[0]+1:array_i[1]]
+                            for array_i in index_header_and_footer[0]]
+    # +1 for the first TDC data from Header
+    index_tdcdiff_within_a_spill = [np.where(np.diff(np.ascontiguousarray(array_i)) < 0)[
+        0] for array_i in index_within_a_spill]
+    # np.diff() returns local index in input
+    # np.ascontiguousarray() makes array_i as contiguous array in memory
 
-"""
-#i=2番目のスピルについて、チャンネルごとのヒット数
-i=2
-plt.title("Channel Hits")
-plt.xlabel("Channel Number")
-plt.ylabel("Entry")
-#全部でall_ch
-plt.scatter(np.arange(all_ch),hittimes_data_in_spill_i(sig_data,eventnum_data,i))
-#ヒットのあったCH一覧
-print(np.nonzero(hittimes_data_in_spill_i(sig_data,eventnum_data,i)))
-#"""
+    index_overflow_and_footer = [np.zeros(
+        len(array_i)+1, dtype=np.int64) for array_i in index_tdcdiff_within_a_spill]
+    # np.insert() is not supported by numba, so preparing an array of the size to need in advance
+    for i in range(len(index_tdcdiff_within_a_spill)):
+        index_overflow_and_footer[i][: len(
+            index_tdcdiff_within_a_spill[i])] = index_tdcdiff_within_a_spill[i] + index_header[i]+1+1
+        index_overflow_and_footer[i][-1] = index_footer[i]
+    # rewrite local index as global index in all data
+    # opverwriting the values of a pre-defined array
 
-"""
-#全てのスピルについて、チャンネルごとのヒット数の合計
-plt.title("Total Channel Hits")
-plt.xlabel("Channel Number")
-plt.ylabel("Entry")
-y = np.zeros(all_ch)
-#スピルの数は全部でspillcount_dataの要素数個
-for i in range(spillcount_data.size):
-    y += hittimes_data_in_spill_i(sig_data,eventnum_data,i)
-    
-#全部でall_ch
-plt.scatter(np.arange(all_ch),y)
-#ヒットのあったCH一覧
-print(np.nonzero(y))
-#"""
+    for array_i in index_overflow_and_footer:
+        for index_k in range(len(array_i)-1):
+            tdc[array_i[index_k]: array_i[index_k+1]] = tdc[array_i[index_k]
+                : array_i[index_k+1]] + (index_k+1) * 2 ** 27
 
-"""
-#ヒットのあったCH一覧(FMA_HPC, J1用に直したもの)
-print((np.where(hitch_data-32>0)[0]-45))
-#plt.scatter(np.arange(18), np.roll(hitch_data,32)[:18])
-#logで見て出ない、他はないということ
-plt.scatter(np.arange(18), np.log(np.roll(hitch_data,32)[:18]))
-plt.xticks(np.arange(18))
-#"""
+    return tdc
 
-"""
-#i=2番目のスピル、n=45 CHについて、TDCのクロックの値の間隔
-i=2
-n=45
-plt.title("No.n Channel Hits")
-plt.xlabel("Clock Count")
-plt.ylabel("Entry")
-#plt.hist(tdcdata_in_spill_i_ch_n(tdc_data,sig_data,eventnum_data,i,n))
-#間隔なら、
-plt.hist(np.diff(tdcdata_in_spill_i_ch_n(tdc_data,sig_data,eventnum_data,i,n),n=1))
-#"""
 
-"""
-#全てのスピル、n=45 CHについて、TDCのクロックの値の間隔
-n=45
-plt.title("No.n Channel Hits")
-plt.xlabel("Clock Count")
-plt.ylabel("Entry")
-y = np.empty(0,dtype=np.int32)
-#スピルの数は全部でspillcount_dataの要素数個
-for i in range(spillcount_data.size):
-    y = np.append(y,np.diff(tdcdata_in_spill_i_ch_n(tdc_data,sig_data,eventnum_data,i,n),n=1))
-edges = np.arange(y.min(),y.max())
-plt.hist(y,bins=edges,histtype="step",log=True)
-#"""
+def processing_tdc(data, index_header, index_footer):
+    # ----TDC----
+    tdc = data & BITS_MASK_TDC
 
-"""
-#you can use hex binary as str
-data_str = file.read(data_unit).hex()
-print(type(data_str))
-print(data_str)
+    index_header = index_header.astype(np.int64)
+    index_footer = index_footer.astype(np.int64)
+    tdc = tdc.astype(np.int64)
 
-data_bin = bytes.fromhex(data_str)
-print(type(data_bin))
-print(data_bin)
-"""
+    tdc = processing_tdc_overflow(tdc, index_header, index_footer)
+
+    return tdc
+
+
+def processing_mrsync(sig, condition_header, condition_footer, tdc):
+    # ----MR SYNC----
+    condition_mrsync = ((sig & BITS_MASK_SIG_MRSYNC) != 0) & (
+        ~condition_header) & (~condition_footer)
+
+    index_mrsync = np.where(condition_mrsync)
+    list_mrsync = np.extract(condition_mrsync, tdc)
+
+    mrsync = np.concatenate([np.full(index_mrsync[0][0], -1), np.repeat(
+        list_mrsync, np.diff(index_mrsync[0], append=sig.size))])
+    # when there are no MR Sync sig in file, index_mrsync[0][0] causes an error
+
+    return mrsync, condition_mrsync, list_mrsync
+
+
+def removing_header_and_footer():
+    # this function may not be necessary, because there are boolian masks, such as conditon_header and condition_footer
+    # ----REMOVING HEADER AND FOOTER----
+    spillcount = np.delete(spillcount, np.concatenate(
+        [index_header[0], index_footer[0]]))
+    sig = np.delete(sig, np.concatenate([index_header[0], index_footer[0]]))
+    tdc = np.delete(tdc, np.concatenate([index_header[0], index_footer[0]]))
+    mrsync = np.delete(mrsync, np.concatenate(
+        [index_header[0], index_footer[0]]))
+
+
+argument = sys.argv
+if(len(argument) != 2):
+    print(argument)
+    print('$ python3 moniter.py path_to_file')
+    sys.exit()
+
+path_to_file = argument[1]
+
+bytes_to_int_universal = np.frompyfunc(bytes_to_int, 1, 1)
+# converting function to universal function
+
+# --------READING--------
+with open(path_to_file, 'rb') as file:
+    data_bytes = file.read()
+
+data = formatting_data(data_bytes)
+
+# --------PROCESSING--------
+# ----SPILLCOUNT----
+spillcount, index_header, index_footer, condition_header, condition_footer, list_spillcount = processing_spillcount(
+    data)
+print('index_header.size: ' + str(index_header.size))
+print('index_header: ' + str(index_header))
+print('index_footer.size: ' + str(index_footer.size))
+print('index_footer: ' + str(index_footer))
+print('list_spillcount.size: ' + str(list_spillcount.size))
+print('list_spillcount: ' + str(list_spillcount))
+# ----SIG----
+sig = processing_sig(data)
+# ----TDC----
+tdc = processing_tdc(data, index_header, index_footer)
+# ----MR SYNC----
+mrsync, condition_mrsync, list_mrsync = processing_mrsync(
+    sig, condition_header, condition_footer, tdc)
+
+# --------ANALYZING--------
+# ########Write the analysis code here using sig, tdc, mrsync and spillcount########
+# condition_somedetector = bit-calc.(sig)
+# tdc_somedetector_p3 = np.extract(condition_somedetector, tdc)
+# tdc_somedetector_mrsync = np.extract(condition_somedetector, tdc - mrsync)
+# ##################################################################################
+
+# --------DRAWING--------
+fig = plt.figure()
+ax = fig.add_subplot(1, 1, 1)
+ax.hist(np.diff(np.extract(condition_mrsync, mrsync)),
+        bins=250, histtype='step', log=True)
+ax.set_ylim(0.1, None)
+plt.show()
