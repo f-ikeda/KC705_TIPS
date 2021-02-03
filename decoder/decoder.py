@@ -1,4 +1,5 @@
 import sys
+import os
 
 import numpy as np
 
@@ -106,8 +107,11 @@ BITS_MASK_FOOTER_UPPER = ((2 ** BITS_SIZE_FOOTER_UPPER - 1) << (BITS_SIZE_SPILLC
 # 104 bits, only the upper BITS_SIZE_FOOTER_UPPER bit is filled with 1
 BITS_MASK_FOOTER_LOWER = 2 ** BITS_SIZE_FOOTER_LOWER - 1
 # 104 bits, only the lower BITS_SIZE_FOOTER_LOWER bit is filled with 1
-BITS_MASK_SPILLCOUNT = (2 ** BITS_SIZE_SPILLCOUNT - 1 <<
-                        (4 + BITS_SIZE_BOARDID + BITS_SIZE_HEADER_LOWER))
+BITS_MASK_SPILLCOUNT_HEADER = (2 ** BITS_SIZE_SPILLCOUNT - 1 <<
+                               (4 + BITS_SIZE_BOARDID + BITS_SIZE_HEADER_LOWER))
+# 104 bits, only the corresponding BITS_SIZE_SPILLCOUNT bit is filled with 1
+BITS_MASK_SPILLCOUNT_FOOTER = (2 ** BITS_SIZE_SPILLCOUNT - 1 <<
+                               (BITS_SIZE_EMCOUNT + BITS_SIZE_WRITECOUNT + BITS_SIZE_FOOTER_LOWER))
 # 104 bits, only the corresponding BITS_SIZE_SPILLCOUNT bit is filled with 1
 BITS_MASK_SIG = (2 ** BITS_SIZE_SIG - 1) << BITS_SIZE_TDC
 # 104 bits, only the upper BITS_SIZE_SIG bit is filled with 1
@@ -164,7 +168,7 @@ def processing_spillcount(data):
     index_footer = np.where(condition_footer)
     # getting the position of the Footer
     list_spillcount = (np.extract(condition_header, data)
-                       & BITS_MASK_SPILLCOUNT)
+                       & BITS_MASK_SPILLCOUNT_HEADER)
     # getting the list of the Spillcount
     spillcount = np.concatenate([np.full(index_header[0][0], -1), np.repeat(
         list_spillcount, np.diff(index_header[0], append=data.size))])
@@ -263,8 +267,10 @@ bytes_to_int_universal = np.frompyfunc(bytes_to_int, 1, 1)
 # converting function to universal function
 
 # --------READING--------
+file_size = os.path.getsize(path_to_file)
+file_size = (int)(file_size/DATA_UNIT)
 with open(path_to_file, 'rb') as file:
-    data_bytes = file.read()
+    data_bytes = file.read(file_size*DATA_UNIT)
 
 data = formatting_data(data_bytes)
 
@@ -276,23 +282,48 @@ print('index_header.size: ' + str(index_header.size))
 print('index_header: ' + str(index_header))
 print('index_footer.size: ' + str(index_footer.size))
 print('index_footer: ' + str(index_footer))
-print('list_spillcount.size: ' + str(list_spillcount.size))
-print('list_spillcount: ' + str(list_spillcount))
+# print('list_spillcount.size: ' + str(list_spillcount.size))
+# print('list_spillcount: ' + str(list_spillcount))
 # ----SIG----
 sig = processing_sig(data)
 # ----TDC----
-tdc = processing_tdc(data, index_header, index_footer)
+#tdc = processing_tdc(data, index_header, index_footer)
 # ----MR SYNC----
-mrsync, condition_mrsync, list_mrsync = processing_mrsync(
-    sig, condition_header, condition_footer, tdc)
+# mrsync, condition_mrsync, list_mrsync = processing_mrsync(
+#    sig, condition_header, condition_footer, tdc)
 
 # --------ANALYZING--------
 # ########Write the analysis code here using sig, tdc, mrsync and spillcount########
 # condition_somedetector = bit-calc.(sig)
 # tdc_somedetector_p3 = np.extract(condition_somedetector, tdc)
 # tdc_somedetector_mrsync = np.extract(condition_somedetector, tdc - mrsync)
+
+spillcount_header = np.extract(condition_header, (data & BITS_MASK_SPILLCOUNT_HEADER) >> (
+    4 + BITS_SIZE_BOARDID + BITS_SIZE_HEADER_LOWER))
+spillcount_footer = np.extract(condition_footer, (data & BITS_MASK_SPILLCOUNT_FOOTER) >> (
+    BITS_SIZE_EMCOUNT + BITS_SIZE_WRITECOUNT + BITS_SIZE_FOOTER_LOWER))
+
+if (spillcount_header.size > spillcount_footer.size):
+    spillcount_header = spillcount_header[:spillcount_footer.size]
+else:
+    spillcount_footer = spillcount_footer[:spillcount_header.size]
+
+print('spillcount_header.size: ' + str(spillcount_header))
+print('spillcount_footer.size: ' + str(spillcount_footer))
+
+print('spillcount_header: ' + str(spillcount_header))
+print('spillcount_footer: ' + str(spillcount_footer))
+spillcount_check = ((spillcount_header - spillcount_footer) == 0)
+print('spillcount_header == spillcount_footer ?: ' + str(spillcount_check))
+print('np.where(spillcount_check == False): ' +
+      str(np.where(spillcount_check == False)))
+print('np.where(np.diff(spillcount_header) != 1))' +
+      str(np.where((np.diff(spillcount_header) != 1) & (-np.diff(spillcount_header) != 0xFFFF))))
+print('np.where(np.diff(spillcount_footer) != 1))' +
+      str(np.where((np.diff(spillcount_footer) != 1) & (-np.diff(spillcount_footer) != 0xFFFF))))
 # ##################################################################################
 
+'''
 # --------DRAWING--------
 fig = plt.figure()
 ax = fig.add_subplot(1, 1, 1)
@@ -300,3 +331,4 @@ ax.hist(np.diff(np.extract(condition_mrsync, mrsync)),
         bins=250, histtype='step', log=True)
 ax.set_ylim(0.1, None)
 plt.show()
+'''
