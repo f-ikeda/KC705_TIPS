@@ -205,8 +205,6 @@ def processing_spillcount(data):
     # using Header's Spillcount
     # when there are no Header in file, index_header[0] causes an error
 
-    print(list_spillcount)
-
     return data, spillcount, index_header, index_footer, condition_header, condition_footer, list_spillcount
 
 
@@ -495,6 +493,8 @@ while (True):
 
     # 仮にP3周期よりも早く描き切った場合、同じ処理が回るので、よくない書き方(残念ながらそんなことないと思うが)
     tdc_coincidenced_p3, tdc_coincidenced_mrsync = decoding(path_to_file)
+
+    print('tdc_coincidenced_p3.size: ' + str(tdc_coincidenced_p3.size))
 
     PLOTTER.reloader(tdc_coincidenced_mrsync, tdc_coincidenced_p3)
     PLOTTER.pause(0.1)
