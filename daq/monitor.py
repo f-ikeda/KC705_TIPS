@@ -50,6 +50,7 @@ import time
 #       ファイル中に、MR Syncが必ず1 つ以上含まれていなければいけない
 #       Headerよりも後、かつ、MR Syncよりも前にイベントがあった場合、mrsyncに前回のスピルの最後のMR Syncの値を割り当てる
 #       spillcountの値は、HeaderとFooterとで同一であること(つまりロスやバグはないこと)を前提に、Headerでの値を使用する
+#       ファイル中に含まれるHeaderとFooterとの個数が合わない場合、余分のHeaderあるいはFooter以降のデータは無視する
 
 DATA_UNIT = 13
 # bytes
@@ -133,11 +134,11 @@ BITS_MASK_SIG_OLDHOD_ALLOR = 0b1000
 BITS_MASK_SIG_MRSYNC = 2 ** BITS_SIZE_SIG_MRSYNC - 1
 # 77 bits, only the lower BIT_SIZE_SIG_MRSYNC bit is filled with 1
 
-DELAY_BH1_TO_NEWHOD = 20
+DELAY_BH1_TO_NEWHOD = 0
 # clock
-DELAY_BH2_TO_NEWHOD = 21
+DELAY_BH2_TO_NEWHOD = 0
 # clock
-DELAY_OLDHOD_TO_NEWHOD = 29
+DELAY_OLDHOD_TO_NEWHOD = 0
 # clock
 
 DELAY_WIDTH = (-1, 0, 1)
@@ -161,6 +162,23 @@ def formatting_data(data_bytes):
     return data
 
 
+def takein_data(data, condition_header, condition_footer, index_header, index_footer):
+    # in case the sizes of index_header[0] and index_footer[0] are different
+
+    if (index_header.size > index_footer.size):
+        index_header = index_header[:index_footer.size]
+        # まじで？
+    else:
+        index_footer = index_footer[:index_header.size]
+
+    data = data[:index_footer[-1] + 1]
+    condition_header = condition_header[:index_footer[-1] + 1]
+    condition_footer = condition_footer[:index_footer[-1] + 1]
+    # +1 is to include the footer itself
+
+    return data, condition_header, condition_footer, index_header, index_footer
+
+
 def processing_spillcount(data):
     # ----SPILLCOUNT----
     condition_header = ((data & (BITS_MASK_HEADER_UPPER | BITS_MASK_HEADER_LOWER)) == (
@@ -170,18 +188,26 @@ def processing_spillcount(data):
         BITS_WORD_FOOTER_UPPER | BITS_WORD_FOOTER_LOWER))
     # making the boolian mask
     index_header = np.where(condition_header)
+    index_header = index_header[0]
     # getting the position of the Header
     index_footer = np.where(condition_footer)
+    index_footer = index_footer[0]
+
+    data, condition_header, condition_footer, index_header, index_footer = takein_data(
+        data, condition_header, condition_footer, index_header, index_footer)
+
     # getting the position of the Footer
     list_spillcount = (np.extract(condition_header, (data)
                                   & BITS_MASK_SPILLCOUNT_HEADER) >> (4 + BITS_SIZE_BOARDID + BITS_SIZE_HEADER_LOWER))
     # getting the list of the Spillcount
-    spillcount = np.concatenate([np.full(index_header[0][0], -1), np.repeat(
-        list_spillcount, np.diff(index_header[0], append=data.size))])
+    spillcount = np.concatenate([np.full(index_header[0], -1), np.repeat(
+        list_spillcount, np.diff(index_header, append=data.size))])
     # using Header's Spillcount
-    # when there are no Header in file, index_header[0][0] causes an error
+    # when there are no Header in file, index_header[0] causes an error
 
-    return spillcount, index_header[0], index_footer[0], condition_header, condition_footer, list_spillcount
+    print(list_spillcount)
+
+    return data, spillcount, index_header, index_footer, condition_header, condition_footer, list_spillcount
 
 
 def processing_sig(data):
@@ -322,7 +348,7 @@ def analyzing(spillcount, condition_header, condition_footer, list_spillcount, s
                               != 0 & ~condition_header & ~condition_footer)
 
     conditions = (condition_newhod_allor, condition_bh1,
-                  condition_bh2, condition_oldhod_allor,)
+                  condition_bh2, condition_oldhod_allor)
     delays_to_newhod = (0, DELAY_BH1_TO_NEWHOD,
                         DELAY_BH2_TO_NEWHOD, DELAY_OLDHOD_TO_NEWHOD)
 
@@ -339,15 +365,13 @@ def decoding(path_to_file):
     # --------READING--------
     print(path_to_file)
     with open(path_to_file, 'rb') as file:
-        file.read(DATA_UNIT)
-        data_bytes = file.read(3580598*DATA_UNIT)
-        #data_bytes = file.read()
+        data_bytes = file.read()
 
     data = formatting_data(data_bytes)
 
     # --------PROCESSING--------
     # ----SPILLCOUNT----
-    spillcount, index_header, index_footer, condition_header, condition_footer, list_spillcount = processing_spillcount(
+    data, spillcount, index_header, index_footer, condition_header, condition_footer, list_spillcount = processing_spillcount(
         data)
     # ----SIG----
     sig = processing_sig(data)
@@ -369,7 +393,7 @@ class plotter(object):
     def __init__(self):
         self.fig = plt.figure(figsize=(10, 8))
         # 画面サイズ
-        self.file_name = 'NOP ;-)'
+        self.file_name = 'WAIT PLEASE ;-)'
 
         self.initializer()
 
@@ -387,14 +411,16 @@ class plotter(object):
         # プロット中のマス目の有無
         self.ax_p3.grid(True)
 
-        self.ax_mrsync.set_title('from MR Sync')
+        self.ax_mrsync.set_title(
+            "New Hod.'s All Or & BH1 & BH2 & Old Hod.'s All Or" + ': ' + self.file_name)
         # タイトル
-        self.ax_p3.set_title('from P3')
+        self.ax_p3.set_title(
+            "New Hod.'s All Or & BH1 & BH2 & Old Hod.'s All Or" + ': ' + self.file_name)
 
-        self.ax_mrsync.set_xlabel('time from MR Sync')
+        self.ax_mrsync.set_xlabel('time from MR Sync [us]')
         # x軸のラベル
         self.ax_mrsync.set_ylabel('events/bin')
-        self.ax_p3.set_xlabel('time from P3')
+        self.ax_p3.set_xlabel('time from P3 [s]')
         self.ax_p3.set_ylabel('events/bin')
 
         self.lines_mrsync = self.ax_mrsync.hist([-1, -1], label='from MR Sync')
@@ -405,8 +431,9 @@ class plotter(object):
         # 更新ごとにあれこれ設定
 
         self.ax_mrsync.cla()
-        self.ax_mrsync.set_title("New Hod.'s All Or & BH1 & BH2 & Old Hod.")
-        self.ax_mrsync.set_xlabel('time from MR Sync')
+        self.ax_mrsync.set_title(
+            "New Hod.'s All Or & BH1 & BH2 & Old Hod.'s All Or" + ': ' + self.file_name)
+        self.ax_mrsync.set_xlabel('time from MR Sync [us]')
         self.ax_mrsync.set_ylabel('events/bin')
         self.ax_mrsync.grid(True)
         self.lines_mrsync = self.ax_mrsync.hist(data_array_mrsync*CLOCK_TIME*pow(
@@ -415,8 +442,9 @@ class plotter(object):
         self.ax_mrsync.legend(loc='upper right')
 
         self.ax_p3.cla()
-        self.ax_p3.set_title("New Hod.'s All Or & BH1 & BH2 & Old Hod.")
-        self.ax_p3.set_xlabel('time from P3')
+        self.ax_p3.set_title(
+            "New Hod.'s All Or & BH1 & BH2 & Old Hod.'s All Or" + ': ' + self.file_name)
+        self.ax_p3.set_xlabel('time from P3 [s]')
         self.ax_p3.set_ylabel('events/bin')
         self.ax_p3.grid(True)
         self.lines_p3 = self.ax_p3.hist(
@@ -427,7 +455,7 @@ class plotter(object):
     def pause(self, second):
         plt.pause(second)
 
-    def finder(path_to_directory):
+    def finder(self, path_to_directory):
         # 最新から二番目を拾ってくる
         list_of_files = glob.glob(path_to_directory+'*')
         latest_two_file = sorted(
@@ -442,9 +470,8 @@ class plotter(object):
 
 
 argument = sys.argv
-if(len(argument) != 2):
-    print(argument)
-    print('$ python3 monitor.py path_to_directory')
+if((len(argument) < 2) & (argument[-1] != 'b')):
+    print('USEAGE: $ python3 monitor.py path_to_directory b(option_debug)')
     # argument[0]: monitor.py
     # argument[1]: path_to_directory
     sys.exit()
@@ -456,10 +483,16 @@ bytes_to_int_universal = np.frompyfunc(bytes_to_int, 1, 1)
 
 PLOTTER = plotter()
 while (True):
-    while(len(PLOTTER.finder(path_to_directory)) == 0):
-        time.sleep(0.3)
+    if (argument[-1] != 'b'):
+        while(len(PLOTTER.finder(path_to_directory)) == 0):
+            print('NO FILE ;-)')
+            time.sleep(0.3)
 
-    path_to_file = PLOTTER.finder(path_to_directory)
+        path_to_file = PLOTTER.finder(path_to_directory)
+    else:
+        path_to_file = 'testdata/1MHz.dat'
+        PLOTTER.file_name = path_to_file
+
     # 仮にP3周期よりも早く描き切った場合、同じ処理が回るので、よくない書き方(残念ながらそんなことないと思うが)
     tdc_coincidenced_p3, tdc_coincidenced_mrsync = decoding(path_to_file)
 
