@@ -284,7 +284,7 @@ def removing_header_and_footer():
 
 @jit('i8[:](i8[:],i8[:])', nopython=True)
 # i8[:] means np.iint64's array
-def intersect1d_p3(array_foo, array_bar):
+def coincidence_p3(array_foo, array_bar):
     # both array of array_foo and array_bar must be sorted
     # array_fooをメインの検出器とする(fooとbarについて非対称なコードだから)
     # 二つの配列大きさが違っていても良い
@@ -294,13 +294,13 @@ def intersect1d_p3(array_foo, array_bar):
     # nのとき、-n,-n+1,...,-1,0,1,...n-1,n
     # 0のとき、0
 
-    array_intersected = np.empty_like(array_foo)
+    array_coincidenced = np.empty_like(array_foo)
     # fooのサイズに合わせれば良い
 
     size_foo = array_foo.size
     size_bar = array_bar.size
 
-    i_foo = j_bar = k_intersected = 0
+    i_foo = j_bar = k_coincidenced = 0
     while i_foo < size_foo and j_bar < size_bar:
         diff_bar_foo = array_bar[j_bar] - array_foo[i_foo]
         # 差分
@@ -315,16 +315,73 @@ def intersect1d_p3(array_foo, array_bar):
             j_bar += 1
         else:
             # fooのちかくにbarがいた！
-            array_intersected[k_intersected] = array_foo[i_foo]
-            k_intersected += 1
+            array_coincidenced[k_coincidenced] = array_foo[i_foo]
+            k_coincidenced += 1
             i_foo += 1
             # コインシデンス幅があるために、j_barをインクリメントしない、次のi_foo+1とも仲良いかもしれないから
 
-    return array_intersected[:k_intersected]
+    return array_coincidenced[:k_coincidenced]
+
+
+@jit('UniTuple(i8[:],2)(UniTuple(i8[:],2),UniTuple(i8[:],2))', nopython=True)
+def coincidence_mrsync(tuple_tdc_foo_and_mrsync_foo, tuple_tdc_bar_and_mrsync_bar):
+    # ここでも、fooをメインの検出器とする(コードの結果は非対称だから)
+    # 重要なのは、インデックスの対応はあくまでAとBとで独立に満たせば十分ということ
+    # 従って、入力: (tdc(foo),mrsync(foo)),(tdc(bar),mrsync(bar))
+    # とし、出力: (tdc(coincidenced),mrsync(coincidenced))
+    # と、2入力1出力のすべての形式を揃えることで、coincidence(C,coincidene(A,B))のように書くことができる
+    # ここで、tdc(A)をあらわに書くと、np.extract((sig & A != 0), tdc)、mrsyncについても同様
+    # 引数はタプルのタプル、再帰に使うのはrecursionで良い
+
+    back_and_forth = 1
+    # コインシデンス幅、メインの検出器に対して0,+-1
+    # nのとき、-n,-n+1,...,-1,0,1,...n-1,n
+    # 0のとき、0
+
+    tdc_foo = tuple_tdc_foo_and_mrsync_foo[0]
+    mrsync_foo = tuple_tdc_foo_and_mrsync_foo[1]
+    tdc_bar = tuple_tdc_bar_and_mrsync_bar[0]
+    mrsync_bar = tuple_tdc_bar_and_mrsync_bar[1]
+
+    tdc_coincidenced = np.empty_like(tdc_foo)
+    mrsync_coincidenced = np.empty_like(mrsync_foo)
+    # fooのサイズに合わせれば良い
+
+    size_foo = tdc_foo.size
+    size_bar = tdc_bar.size
+    # tdcとmrsyncとでサイズは同じなのでどちらでも構わないが
+
+    i_foo = j_bar = k_coincidenced = 0
+    while i_foo < len(tdc_foo) and j_bar < len(tdc_bar):
+        # どちらか一方の配列を走査し終えた時点で、他方の配列の残りを見てもしょうがないから
+        # Notes: while X and Y: と書いたとき、XあるいはYのいずれか一方が満たされなくなったらループを抜ける
+
+        diff_bar_foo = tdc_bar[j_bar] - tdc_foo[i_foo]
+        # p3基準ならtdcの値は狭義の単調増加なため一意に定まるから、比較がしやすい
+        # 従って、p3基準でコインシデンス幅におさまるかを見てから、mrsyncの分を差っ引く作戦
+
+        if (diff_bar_foo > back_and_forth):
+            # fooは少し先にbarの気配を感じた！
+            # fooは駆け足
+            i_foo += 1
+        elif (diff_bar_foo < -back_and_forth):
+            # barは少し先にfooの気配を感じた！
+            # barは駆け足
+            j_bar += 1
+        else:
+            # fooのちかくにbarがいた！
+            tdc_coincidenced[k_coincidenced] = tdc_foo[i_foo]
+            mrsync_coincidenced[k_coincidenced] = mrsync_foo[i_foo]
+            k_coincidenced += 1
+            i_foo += 1
+            # コインシデンス幅があるために、j_barをインクリメントしない、次のi_foo+1とも仲良いかもしれないから
+
+    return tdc_coincidenced[:k_coincidenced], mrsync_coincidenced[:k_coincidenced]
 
 
 def recursion(function, tuple_argument):
     # 再帰処理をさせるため
+    # 関数fと引数の集合A,B,Cに対して、f(f(A,B),C)、fは対称律を満たしていないから、この順序は重要
     result = function(tuple_argument[0], tuple_argument[1])
     if (len(tuple_argument) > 2):
         # tuple_argumentに二個しかない場合、iに空が入るのを防ぐため
@@ -350,11 +407,22 @@ def coincidence(spillcount, condition_header, condition_footer, list_spillcount,
         condition_spill_k = ((spillcount == spill_k) & ~
                              condition_header & ~condition_footer)
 
-        tdc_coincidenced_p3 = np.insert(tdc_coincidenced_p3, tdc_coincidenced_p3.size, recursion(intersect1d_p3, tuple([np.extract(
+        tdc_coincidenced_p3 = np.insert(tdc_coincidenced_p3, tdc_coincidenced_p3.size, recursion(coincidence_p3, tuple([np.extract(
             condition_i_and_tdc_delayed_i[0] & condition_spill_k, condition_i_and_tdc_delayed_i[1]) for condition_i_and_tdc_delayed_i in zip(conditions, tdc_delayed)])))
-        tdc_coincidenced_mrsync = np.insert(tdc_coincidenced_mrsync, tdc_coincidenced_mrsync.size, reduce(
-            np.intersect1d, tuple([np.extract(condition_i_and_tdc_delayed_i[0] & condition_spill_k, condition_i_and_tdc_delayed_i[1] - mrsync) for condition_i_and_tdc_delayed_i in zip(conditions, tdc_delayed)])))
-        # この書き方では、MR Syncごとに独立にコインシデンスを取れていない。要修正
+
+        tdc_coincidenced, mrsync_coincidenced = recursion(coincidence_mrsync, tuple([tuple([np.extract(
+            condition_i_and_tdc_delayed_i[0] & condition_spill_k, condition_i_and_tdc_delayed_i[1]), np.extract(
+            condition_i_and_tdc_delayed_i[0] & condition_spill_k, mrsync)]) for condition_i_and_tdc_delayed_i in zip(conditions, tdc_delayed)]))
+        tdc_coincidenced_mrsync = np.insert(
+            tdc_coincidenced_mrsync, tdc_coincidenced_mrsync.size, tdc_coincidenced - mrsync_coincidenced)
+        # 非常に読みにくいが、
+        # タプルのタプルをつくっているだけ
+        # >>> a = (1,2,4)
+        # >>> b = (3,5,6)
+        # >>> c = tuple([tuple([i,j]) for i,j in zip(a,b)])
+        # >>> c
+        # ((1, 3), (2, 5), (4, 6))
+        # 欲しいのは((tdc,mrsync),(tdc,mrsync),...)
 
     return tdc_coincidenced_p3, tdc_coincidenced_mrsync
 
@@ -525,6 +593,7 @@ while (True):
     # 仮にP3周期よりも早く描き切った場合、同じ処理が回るので、よくない書き方(残念ながらそんなことないと思うが)
     tdc_coincidenced_p3, tdc_coincidenced_mrsync = decoding(path_to_file)
 
+    print('tdc_coincidenced_mrsync.size: ' + str(tdc_coincidenced_mrsync.size))
     print('tdc_coincidenced_p3.size: ' + str(tdc_coincidenced_p3.size))
 
     PLOTTER.reloader(tdc_coincidenced_mrsync, tdc_coincidenced_p3)
