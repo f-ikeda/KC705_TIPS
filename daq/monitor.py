@@ -14,7 +14,7 @@ import time
 # for debug
 
 # ########DESCRIPTION########
-# USEAGE: $ python3 moniter.py path_to_directory
+# USEAGE: $ python3 monitor.py path_to_directory
 #
 # INPUT: raw binary file, such as there are
 #        00000000000001000000000123 <- hit on detector
@@ -44,17 +44,26 @@ import time
 #           ANALYZING     ...
 #           DRAWING       ...drawing some plots
 #
-# ISSUES: Header, Footerが12月仕様
-#         遅い(描画に関してはPython便利、なので、いっそCで計算した結果を配列に格納するようにする、速度はダンチ
-#           　手順としては、numpy配列を用意しておいて、ポインタを渡して値を書き換え
-#             ただ、このコードのほとんどをリファクタリングするので、まとまった時間があるときにやりたい。。)
+# ISSUES: コインシデンス、各MR Syncごとに独立にしろ
 #
 # 仕様: ファイル中に、HeaderとFooterとが、同数かつHeader,Footer,...,Header,Footerの順に、必ず1 組以上含まれていなければいけない
 #       ファイル中に、MR Syncが必ず1 つ以上含まれていなければいけない
 #       Headerよりも後、かつ、MR Syncよりも前にイベントがあった場合、mrsyncに前回のスピルの最後のMR Syncの値を割り当てる
+#       spillcountの値は、HeaderとFooterとで同一であること(つまりロスやバグはないこと)を前提に、Headerでの値を使用する
 
 DATA_UNIT = 13
 # bytes
+# DIN    <= {HEADER[31:0],SPLCOUNT[15:0],4'd0,BOARD_ID[3:0],48'h0123_4567_89AB}; // HEADER =  REG_HEADER[31:0]
+#            x08_Reg[7:0]    <= 8'h01;   // Header
+#            x09_Reg[7:0]    <= 8'h23;   // Header
+#            x0A_Reg[7:0]    <= 8'h45;   // Header
+#            x0B_Reg[7:0]    <= 8'h67;   // Header
+# DIN    <= {FOOTER[31:0],SPLCOUNT[15:0],EMCOUNT[15:0],wrCnt[31:0],8'hAB}; // FOOTER = REG_FOOTER[31:0]
+#            x0C_Reg[7:0]    <= 8'hAA;   // Footer
+#            x0D_Reg[7:0]    <= 8'hAA;   // Footer
+#            x0E_Reg[7:0]    <= 8'hAA;   // Footer
+#            x0F_Reg[7:0]    <= 8'hAA;   // Footer
+# DIN    <= {SIG[76:0],COUNTER[26:0]}; // 104-bits
 # {MainHodo[63:0],PMR[11:0],MR_Sync,COUNTER[26:0]}
 BITS_SIZE_SIG = 77
 # bits
@@ -70,24 +79,46 @@ BITS_SIZE_BOARDID = 4
 # bits
 BITS_SIZE_SPILLCOUNT = 16
 # bits
-BITS_SIZE_HEADER = 84
+BITS_SIZE_EMCOUNT = 16
 # bits
-BITS_SIZE_FOOTER = 84
+BITS_SIZE_WRITECOUNT = 32
+# bits
+BITS_SIZE_HEADER_UPPER = 32
+# bits
+BITS_SIZE_HEADER_LOWER = 48
+# bits
+BITS_SIZE_FOOTER_UPPER = 32
+# bits
+BITS_SIZE_FOOTER_LOWER = 8
 # bits
 
-BITS_WORD_HEADER = 0xABB000123456701234567 << (
-    BITS_SIZE_BOARDID + BITS_SIZE_SPILLCOUNT)
+BITS_WORD_HEADER_UPPER = (0x01234567 << (
+    BITS_SIZE_SPILLCOUNT + 4 + BITS_SIZE_BOARDID + BITS_SIZE_HEADER_LOWER))
 # use with just ==, on raw(104 bits) data
-BITS_WORD_FOOTER = 0xFEE00AAAAAAAAAAAAAAAA
+BITS_WORD_HEADER_LOWER = 0x0123456789AB
+# use with just ==, on raw(104 bits) data
+BITS_WORD_FOOTER_UPPER = (0xAAAAAAAA << (
+    BITS_SIZE_SPILLCOUNT + BITS_SIZE_EMCOUNT + BITS_SIZE_WRITECOUNT + BITS_SIZE_FOOTER_LOWER))
+# use with just ==, on raw(104 bits) data
+BITS_WORD_FOOTER_LOWER = 0xAB
 # use with just ==, on raw(104 bits) data
 
-BITS_MASK_HEADER = (2 ** BITS_SIZE_HEADER -
-                    1) << (BITS_SIZE_BOARDID + BITS_SIZE_SPILLCOUNT)
-# 104 bits, only the upper BITS_SIZE_HEADER bit is filled with 1
-BITS_MASK_FOOTER = 2 ** BITS_SIZE_FOOTER - 1
-# 104 bits, only the lower BITS_SIZE_FOOTER bit is filled with 1
-BITS_MASK_SPILLCOUNT = 2 ** BITS_SIZE_SPILLCOUNT - 1
-# 104 bits, only the lower BITS_SIZE_SPILLCOUNT bit is filled with 1
+BITS_MASK_HEADER_UPPER = ((2 ** BITS_SIZE_HEADER_UPPER - 1) <<
+                          (BITS_SIZE_SPILLCOUNT + 4 + BITS_SIZE_BOARDID + BITS_SIZE_HEADER_LOWER))
+# 104 bits, only the upper BITS_SIZE_HEADER_UPPER bit is filled with 1
+BITS_MASK_HEADER_LOWER = 2 ** BITS_SIZE_HEADER_LOWER - 1
+# 104 bits, only the lower BITS_SIZE_HEADER_LOWER bit is filled with 1
+BITS_MASK_FOOTER_UPPER = ((2 ** BITS_SIZE_FOOTER_UPPER - 1) << (BITS_SIZE_SPILLCOUNT +
+                                                                BITS_SIZE_EMCOUNT + BITS_SIZE_WRITECOUNT + BITS_SIZE_FOOTER_LOWER))
+# 104 bits, only the upper BITS_SIZE_FOOTER_UPPER bit is filled with 1
+BITS_MASK_FOOTER_LOWER = 2 ** BITS_SIZE_FOOTER_LOWER - 1
+# 104 bits, only the lower BITS_SIZE_FOOTER_LOWER bit is filled with 1
+BITS_MASK_SPILLCOUNT_HEADER = (2 ** BITS_SIZE_SPILLCOUNT - 1 <<
+                               (4 + BITS_SIZE_BOARDID + BITS_SIZE_HEADER_LOWER))
+# 104 bits, only the corresponding BITS_SIZE_SPILLCOUNT bit is filled with 1
+BITS_MASK_SPILLCOUNT_FOOTER = (2 ** BITS_SIZE_SPILLCOUNT - 1 <<
+                               (BITS_SIZE_EMCOUNT + BITS_SIZE_WRITECOUNT + BITS_SIZE_FOOTER_LOWER))
+# 104 bits, only the corresponding BITS_SIZE_SPILLCOUNT bit is filled with 1
 BITS_MASK_SIG = (2 ** BITS_SIZE_SIG - 1) << BITS_SIZE_TDC
 # 104 bits, only the upper BITS_SIZE_SIG bit is filled with 1
 BITS_MASK_TDC = 2 ** BITS_SIZE_TDC - 1
@@ -132,19 +163,22 @@ def formatting_data(data_bytes):
 
 def processing_spillcount(data):
     # ----SPILLCOUNT----
-    condition_header = ((data & BITS_MASK_HEADER) == BITS_WORD_HEADER)
+    condition_header = ((data & (BITS_MASK_HEADER_UPPER | BITS_MASK_HEADER_LOWER)) == (
+        BITS_WORD_HEADER_UPPER | BITS_WORD_HEADER_LOWER))
     # making the boolian mask
-    condition_footer = ((data & BITS_MASK_FOOTER) == BITS_WORD_FOOTER)
+    condition_footer = ((data & (BITS_MASK_FOOTER_UPPER | BITS_MASK_FOOTER_LOWER)) == (
+        BITS_WORD_FOOTER_UPPER | BITS_WORD_FOOTER_LOWER))
     # making the boolian mask
     index_header = np.where(condition_header)
     # getting the position of the Header
     index_footer = np.where(condition_footer)
     # getting the position of the Footer
-    list_spillcount = (np.extract(condition_header, data)
-                       & BITS_MASK_SPILLCOUNT)
+    list_spillcount = (np.extract(condition_header, (data)
+                                  & BITS_MASK_SPILLCOUNT_HEADER) >> (4 + BITS_SIZE_BOARDID + BITS_SIZE_HEADER_LOWER))
     # getting the list of the Spillcount
     spillcount = np.concatenate([np.full(index_header[0][0], -1), np.repeat(
         list_spillcount, np.diff(index_header[0], append=data.size))])
+    # using Header's Spillcount
     # when there are no Header in file, index_header[0][0] causes an error
 
     return spillcount, index_header[0], index_footer[0], condition_header, condition_footer, list_spillcount
@@ -229,7 +263,7 @@ def removing_header_and_footer():
 
 @jit('i8[:](i8[:],i8[:])', nopython=True)
 # i8[:] means np.iint64's array
-def intersect1d_alternative(array_foo, array_bar):
+def intersect1d_sorted(array_foo, array_bar):
     # both array of array_foo and array_bar must be sorted
     array_intersected = np.empty_like(array_foo)
 
@@ -266,9 +300,10 @@ def coincidence(spillcount, condition_header, condition_footer, list_spillcount,
                                  condition_header & ~condition_footer)
 
             tdc_coincidenced_p3 = np.insert(tdc_coincidenced_p3, tdc_coincidenced_p3.size, reduce(
-                intersect1d_alternative, tuple([np.extract(condition_i_and_tdc_delayed_i[0] & condition_spill_k, condition_i_and_tdc_delayed_i[1]) for condition_i_and_tdc_delayed_i in zip(conditions, tdc_delayed)])))
+                intersect1d_sorted, tuple([np.extract(condition_i_and_tdc_delayed_i[0] & condition_spill_k, condition_i_and_tdc_delayed_i[1]) for condition_i_and_tdc_delayed_i in zip(conditions, tdc_delayed)])))
             tdc_coincidenced_mrsync = np.insert(tdc_coincidenced_mrsync, tdc_coincidenced_mrsync.size, reduce(
                 np.intersect1d, tuple([np.extract(condition_i_and_tdc_delayed_i[0] & condition_spill_k, condition_i_and_tdc_delayed_i[1] - mrsync) for condition_i_and_tdc_delayed_i in zip(conditions, tdc_delayed)])))
+            # この書き方では、MR Syncごとに独立にコインシデンスを取れていない。要修正
 
     return tdc_coincidenced_p3, tdc_coincidenced_mrsync
 
@@ -302,8 +337,11 @@ def analyzing(spillcount, condition_header, condition_footer, list_spillcount, s
 
 def decoding(path_to_file):
     # --------READING--------
+    print(path_to_file)
     with open(path_to_file, 'rb') as file:
-        data_bytes = file.read()
+        file.read(DATA_UNIT)
+        data_bytes = file.read(3580598*DATA_UNIT)
+        #data_bytes = file.read()
 
     data = formatting_data(data_bytes)
 
@@ -331,6 +369,8 @@ class plotter(object):
     def __init__(self):
         self.fig = plt.figure(figsize=(10, 8))
         # 画面サイズ
+        self.file_name = 'NOP ;-)'
+
         self.initializer()
 
     def initializer(self):
@@ -351,9 +391,11 @@ class plotter(object):
         # タイトル
         self.ax_p3.set_title('from P3')
 
-        self.ax_mrsync.set_xlabel('x')
+        self.ax_mrsync.set_xlabel('time from MR Sync')
         # x軸のラベル
-        self.ax_mrsync.set_ylabel('y')
+        self.ax_mrsync.set_ylabel('events/bin')
+        self.ax_p3.set_xlabel('time from P3')
+        self.ax_p3.set_ylabel('events/bin')
 
         self.lines_mrsync = self.ax_mrsync.hist([-1, -1], label='from MR Sync')
         self.lines_p3 = self.ax_p3.hist([-1, -1], label='from P3')
@@ -363,7 +405,9 @@ class plotter(object):
         # 更新ごとにあれこれ設定
 
         self.ax_mrsync.cla()
-        self.ax_mrsync.set_title('from MR Sync')
+        self.ax_mrsync.set_title("New Hod.'s All Or & BH1 & BH2 & Old Hod.")
+        self.ax_mrsync.set_xlabel('time from MR Sync')
+        self.ax_mrsync.set_ylabel('events/bin')
         self.ax_mrsync.grid(True)
         self.lines_mrsync = self.ax_mrsync.hist(data_array_mrsync*CLOCK_TIME*pow(
             10, -3), bins=250, histtype='step', log=True, label='from MR Sync')
@@ -371,7 +415,9 @@ class plotter(object):
         self.ax_mrsync.legend(loc='upper right')
 
         self.ax_p3.cla()
-        self.ax_p3.set_title('from P3')
+        self.ax_p3.set_title("New Hod.'s All Or & BH1 & BH2 & Old Hod.")
+        self.ax_p3.set_xlabel('time from P3')
+        self.ax_p3.set_ylabel('events/bin')
         self.ax_p3.grid(True)
         self.lines_p3 = self.ax_p3.hist(
             data_array_p3*CLOCK_TIME*pow(10, -9), bins=250, histtype='step', log=True, label='from P3')
@@ -381,24 +427,26 @@ class plotter(object):
     def pause(self, second):
         plt.pause(second)
 
+    def finder(path_to_directory):
+        # 最新から二番目を拾ってくる
+        list_of_files = glob.glob(path_to_directory+'*')
+        latest_two_file = sorted(
+            list_of_files, key=os.path.getctime, reverse=True)[:2]
 
-def finder(path_to_directory):
-    # 最新から二番目を拾ってくる
-    list_of_files = glob.glob(path_to_directory+'*')
-    latest_two_file = sorted(
-        list_of_files, key=os.path.getctime, reverse=True)[:2]
-
-    if(len(latest_two_file[1:2]) > 0):
-        path_to_file = latest_two_file[1]
-        return path_to_file
-    else:
-        return ''
+        if(len(latest_two_file[1:2]) > 0):
+            path_to_file = latest_two_file[1]
+            self.file_name = path_to_file
+            return path_to_file
+        else:
+            return ''
 
 
 argument = sys.argv
 if(len(argument) != 2):
     print(argument)
-    print('$ python3 moniter.py path_to_directory')
+    print('$ python3 monitor.py path_to_directory')
+    # argument[0]: monitor.py
+    # argument[1]: path_to_directory
     sys.exit()
 
 path_to_directory = argument[1]
@@ -408,10 +456,10 @@ bytes_to_int_universal = np.frompyfunc(bytes_to_int, 1, 1)
 
 PLOTTER = plotter()
 while (True):
-    while(len(finder(path_to_directory)) == 0):
+    while(len(PLOTTER.finder(path_to_directory)) == 0):
         time.sleep(0.3)
 
-    path_to_file = finder(path_to_directory)
+    path_to_file = PLOTTER.finder(path_to_directory)
     # 仮にP3周期よりも早く描き切った場合、同じ処理が回るので、よくない書き方(残念ながらそんなことないと思うが)
     tdc_coincidenced_p3, tdc_coincidenced_mrsync = decoding(path_to_file)
 
