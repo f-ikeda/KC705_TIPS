@@ -141,9 +141,6 @@ DELAY_BH2_TO_NEWHOD = 0
 DELAY_OLDHOD_TO_NEWHOD = 0
 # clock
 
-DELAY_WIDTH = (-1, 0, 1)
-# 3 clock, +-1 and 0
-
 CLOCK_TIME = 5
 # ns
 
@@ -287,47 +284,77 @@ def removing_header_and_footer():
 
 @jit('i8[:](i8[:],i8[:])', nopython=True)
 # i8[:] means np.iint64's array
-def intersect1d_sorted(array_foo, array_bar):
+def intersect1d_p3(array_foo, array_bar):
     # both array of array_foo and array_bar must be sorted
+    # array_fooをメインの検出器とする(fooとbarについて非対称なコードだから)
+    # 二つの配列大きさが違っていても良い
+
+    back_and_forth = 1
+    # コインシデンス幅、メインの検出器に対して0,+-1
+    # nのとき、-n,-n+1,...,-1,0,1,...n-1,n
+    # 0のとき、0
+
     array_intersected = np.empty_like(array_foo)
+    # fooのサイズに合わせれば良い
 
-    index_i = index_j = index_k = 0
-    while index_i < array_foo.size and index_j < array_bar.size:
-        if array_foo[index_i] == array_bar[index_j]:
-            array_intersected[index_k] = array_foo[index_i]
-            index_i += 1
-            index_j += 1
-            index_k += 1
-        elif array_foo[index_i] < array_bar[index_j]:
-            index_i += 1
+    size_foo = array_foo.size
+    size_bar = array_bar.size
+
+    i_foo = j_bar = k_intersected = 0
+    while i_foo < size_foo and j_bar < size_bar:
+        diff_bar_foo = array_bar[j_bar] - array_foo[i_foo]
+        # 差分
+
+        if (diff_bar_foo > back_and_forth):
+            # fooは少し先にbarの気配を感じた！
+            # fooは駆け足
+            i_foo += 1
+        elif (diff_bar_foo < -back_and_forth):
+            # barは少し先にfooの気配を感じた！
+            # barは駆け足
+            j_bar += 1
         else:
-            index_j += 1
+            # fooのちかくにbarがいた！
+            array_intersected[k_intersected] = array_foo[i_foo]
+            k_intersected += 1
+            i_foo += 1
+            # コインシデンス幅があるために、j_barをインクリメントしない、次のi_foo+1とも仲良いかもしれないから
 
-    return array_intersected[:index_k]
+    return array_intersected[:k_intersected]
 
 
-def coincidence(spillcount, condition_header, condition_footer, list_spillcount, tdc, mrsync, conditions, delays_to_newhod, delay_width):
+def recursion(function, tuple_argument):
+    # 再帰処理をさせるため
+    result = function(tuple_argument[0], tuple_argument[1])
+    if (len(tuple_argument) > 2):
+        # tuple_argumentに二個しかない場合、iに空が入るのを防ぐため
+        for i in range(2, len(tuple_argument)):
+            result = function(result, tuple_argument[i])
+    return result
+
+
+def coincidence(spillcount, condition_header, condition_footer, list_spillcount, tdc, mrsync, conditions, delays_to_newhod):
     # ----COINCIDENCE----
     tdc_coincidenced_p3 = np.empty(0, dtype=np.int64)
     tdc_coincidenced_mrsync = np.empty(0, dtype=np.int64)
 
-    for i in delay_width:
-        delays_to_newhod = (i,) + delays_to_newhod[1:]
+    tdc_delayed = [(tdc - delay_i)
+                   for delay_i in delays_to_newhod]
+    # print('tdc_delayed: ' + str(tdc_delayed))
+    # tdc_delayed[1:]は、コインシデンスとるchに対応
+    # tdc_delayedは、オフセット(new hod.自分自身とは0)を考慮した、tdc配列の配列
+    # pre-calculate in order to avoid unnecessary repetition in the for statement
 
-        tdc_delayed = [(tdc - delay_i)
-                       for delay_i in delays_to_newhod]
-        # pre-calculate in order to avoid unnecessary repetition in the for statement
+    for spill_k in list_spillcount:
+        # coincidence has to be considered for each spill independently
+        condition_spill_k = ((spillcount == spill_k) & ~
+                             condition_header & ~condition_footer)
 
-        for spill_k in list_spillcount:
-            # coincidence has to be considered for each spill independently
-            condition_spill_k = ((spillcount == spill_k) & ~
-                                 condition_header & ~condition_footer)
-
-            tdc_coincidenced_p3 = np.insert(tdc_coincidenced_p3, tdc_coincidenced_p3.size, reduce(
-                intersect1d_sorted, tuple([np.extract(condition_i_and_tdc_delayed_i[0] & condition_spill_k, condition_i_and_tdc_delayed_i[1]) for condition_i_and_tdc_delayed_i in zip(conditions, tdc_delayed)])))
-            tdc_coincidenced_mrsync = np.insert(tdc_coincidenced_mrsync, tdc_coincidenced_mrsync.size, reduce(
-                np.intersect1d, tuple([np.extract(condition_i_and_tdc_delayed_i[0] & condition_spill_k, condition_i_and_tdc_delayed_i[1] - mrsync) for condition_i_and_tdc_delayed_i in zip(conditions, tdc_delayed)])))
-            # この書き方では、MR Syncごとに独立にコインシデンスを取れていない。要修正
+        tdc_coincidenced_p3 = np.insert(tdc_coincidenced_p3, tdc_coincidenced_p3.size, recursion(intersect1d_p3, tuple([np.extract(
+            condition_i_and_tdc_delayed_i[0] & condition_spill_k, condition_i_and_tdc_delayed_i[1]) for condition_i_and_tdc_delayed_i in zip(conditions, tdc_delayed)])))
+        tdc_coincidenced_mrsync = np.insert(tdc_coincidenced_mrsync, tdc_coincidenced_mrsync.size, reduce(
+            np.intersect1d, tuple([np.extract(condition_i_and_tdc_delayed_i[0] & condition_spill_k, condition_i_and_tdc_delayed_i[1] - mrsync) for condition_i_and_tdc_delayed_i in zip(conditions, tdc_delayed)])))
+        # この書き方では、MR Syncごとに独立にコインシデンスを取れていない。要修正
 
     return tdc_coincidenced_p3, tdc_coincidenced_mrsync
 
@@ -353,9 +380,11 @@ def analyzing(spillcount, condition_header, condition_footer, list_spillcount, s
     # tdc_somedetector_p3 = np.extract(condition_somedetector, tdc)
     # tdc_somedetector_mrsync = np.extract(condition_somedetector, tdc - mrsync)
     tdc_coincidenced_p3, tdc_coincidenced_mrsync = coincidence(spillcount, condition_header, condition_footer, list_spillcount, tdc, mrsync,
-                                                               conditions, delays_to_newhod, DELAY_WIDTH)
+                                                               conditions, delays_to_newhod)
     # ##################################################################################
 
+    # return np.extract(condition_newhod_allor, tdc), tdc_coincidenced_mrsync
+    # for debug, non-coincidenced
     return tdc_coincidenced_p3, tdc_coincidenced_mrsync
 
 
@@ -468,7 +497,9 @@ class plotter(object):
 
 
 argument = sys.argv
-if((len(argument) < 2) & (argument[-1] != 'b')):
+debug_mode = (argument[-1] == 'b')
+
+if((len(argument) < 2) & (not debug_mode)):
     print('USEAGE: $ python3 monitor.py path_to_directory b(option_debug)')
     # argument[0]: monitor.py
     # argument[1]: path_to_directory
@@ -481,7 +512,7 @@ bytes_to_int_universal = np.frompyfunc(bytes_to_int, 1, 1)
 
 PLOTTER = plotter()
 while (True):
-    if (argument[-1] != 'b'):
+    if (not debug_mode):
         while(len(PLOTTER.finder(path_to_directory)) == 0):
             print('NO FILE ;-)')
             time.sleep(0.3)
