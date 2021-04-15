@@ -102,6 +102,7 @@ def main(path_to_file):
     spill_count = -1
     spill_count_old = -1
     bufferlabel_list = []
+    recordedmrsync_list = []
     # key: spillcount : [output_count, total_hit_in_a_spill]
     spill_info = {}
     with open(path_to_file, 'rb') as f:
@@ -129,7 +130,7 @@ def main(path_to_file):
                     output_count = data_with_a_spill.shape[0]
                     total_hits_in_a_spill = data_with_a_spill.sum()
                     spill_info[spill_count_old] = np.array([
-                        output_count, bufferlabel_list[0:-1], total_hits_in_a_spill], dtype=object)
+                        output_count, bufferlabel_list[0:-1], recordedmrsync_list, total_hits_in_a_spill], dtype=object)
 
                     if (args.graphspill == spill_count_old):
                         plot_spill(data_with_a_spill)
@@ -138,11 +139,13 @@ def main(path_to_file):
                     data_with_a_spill = np.empty(
                         (0, 1088, 74), dtype=np.uint16)
                     bufferlabel_list = [bufferlabel_list[-1]]
+                    recordedmrsync_list = []
 
                 spill_count_old = spill_count
 
             elif ((int_1word >> (6 * 8)) == bit.FOOTER_MAGICWORD):
                 #  フッターが来たら
+                recordedmrsync_list.append(int_1word & 0xFFFFFFFF)
 
                 if (f.tell == os.path.getsize(path_to_file)):
                     # 最後の最後に限りここでアウトプットごとのデータを詰める(次のヘッダーがないから)
@@ -152,7 +155,7 @@ def main(path_to_file):
                     output_count = data_with_a_spill.shape[0]
                     total_hits_in_a_spill = data_with_a_spill.sum()
                     spill_info[spill_count_old] = np.array([
-                        output_count, bufferlabel_list, total_hits_in_a_spill], dtype=object)
+                        output_count, bufferlabel_list, recordedmrsync_list, total_hits_in_a_spill], dtype=object)
 
             else:
                 # データの場合
@@ -164,15 +167,15 @@ def main(path_to_file):
 
                 if args.nonzero and (np.count_nonzero(data != 0)):
                     # ヒットがあった場合のみアウトプットごとに情報表示モード
-                    print('spill_count:', 'output times:', 'bufferlabel', 'relative time(ns):', 'total hits:',
-                          spill_count,  data_with_a_spill.shape[0] + 1, bufferlabel_list[-1], data_with_a_output.shape[0] * 5, data.sum())
+                    print('spillcount:', 'output no.:', 'bufferlabel', 'relative time(ns):', 'total hits:',
+                          spill_count,  data_with_a_spill.shape[0] + 1, bufferlabel_list[-1],  data_with_a_output.shape[0] * 5, data.sum())
 
     if args.spillinfo:
         # 全部読み切ったら
-        print('\nlist of spill_count:', spill_info.keys())
+        print('\nlist of spillcount:', spill_info.keys())
         # 辞書をキーごとに表示
         print(
-            '{spill_count: [output_count, [bufferlabel_list], total_hits_in_a_spill]}')
+            '{spillcount: [outputcount, [bufferlabel list], [recordedmrsync list], total hits in this spill]}')
         pprint.pprint(spill_info)
 
 
