@@ -123,6 +123,8 @@ def plot_totalhit(spill_info):
 
 
 def main(path_to_file):
+    # macで必要
+    bit.DATA_TYPE = bit.DATA_TYPE.newbyteorder('>')
 
     # アウトプットごとの情報
     data_with_a_output = np.zeros((0, 74), dtype=np.uint16)
