@@ -30,6 +30,8 @@ def get_option():
                            help='draw graph of certain spillcount')
     argparser.add_argument('-ch', '--channel', type=int, default=99,
                            help='draw graph of certain channel, use with -gs')
+    argparser.add_argument(
+        '-gt', '--graphtotalhit', action='store_true', help='draw graph of total hits for each spill')
 
     return argparser.parse_args()
 
@@ -88,6 +90,33 @@ def plot_spill(data_with_a_spill):
         ax2.set_title('ch:' + str(args.channel))
         ax2.set_xlabel('ns')
         ax2.set_ylabel('Entries')
+
+    plt.show()
+    sys.exit()
+
+
+def plot_totalhit(spill_info):
+
+    fig = plt.figure(figsize=(8, 6))
+    plt.subplots_adjust(wspace=0.4, hspace=0.6)
+
+    ax1 = fig.add_subplot(1, 1, 1)
+    x_range = range(len(spill_info))
+    y = np.array([info[-1] for info in list(spill_info.values())])
+    entries = y.sum()
+    ax1.step(x_range, y, where='post', label='Entries:' + str(entries))
+
+    ax1.set_yscale('log')
+    ax1.set_ylim(0.1, y.max() * 10)
+
+    ax1.grid(axis="y")
+    ax1.minorticks_on()
+    ax1.grid(which="both", axis="x")
+
+    ax1.legend()
+    ax1.set_title('spillcount vs. total hits')
+    ax1.set_xlabel('spillcount')
+    ax1.set_ylabel('Entries')
 
     plt.show()
     sys.exit()
@@ -177,6 +206,9 @@ def main(path_to_file):
         print(
             '{spillcount: [outputcount, [bufferlabel list], [recordedmrsync list], total hits in this spill]}')
         pprint.pprint(spill_info)
+
+    if args.graphtotalhit:
+        plot_totalhit(spill_info)
 
 
 if __name__ == '__main__':
