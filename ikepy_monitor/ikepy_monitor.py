@@ -50,6 +50,8 @@ def get_option():
         '-d', '--dir', type=str, default=None, help='path to directory')
     argparser.add_argument(
         '-f', '--file', type=str, default=None, help='path to file')
+    argparser.add_argument(
+        '-k', '--kc', type=int, default=1, help='select KC705-(1 or 2)')
 
     return argparser
 
@@ -348,11 +350,10 @@ class SomeCalcs(object):
             oldhod, mrsync_oldhod, \
             expmt, mrsync_expmt
 
-    def get_hitmap(self, sig_mppc, sig_pmt):
+    def get_hitmap(self, sig_mppc, sig_pmt, kc705_id):
         # 要リファクタリング、特に行列をはっつけるとこ、どのアンプボードに対応しているかを明示した方が良い
 
-        kc705 = 2
-        if (kc705 == 1):
+        if (kc705_id == 1):
 
             # for KC705-1
             # ここのネーミング、la->lpc, ha->hpcが正しい、要修正
@@ -413,7 +414,7 @@ class SomeCalcs(object):
                 hitmap_newhod_2d, [5+32], np.zeros((4, 24+5), dtype='i8'), axis=1)
             print('hitmap_newhod_2d(finally):', hitmap_newhod_2d.shape)
 
-        if (kc705 == 2):
+        if (kc705_id == 2):
 
             # amp. board: 5, 6, 7
             hpc_top = [0, 7, 1, 2, 14, 3, 4, 6,
@@ -692,7 +693,7 @@ class plotter(object):
 
     def pauser(self, second, content_type):
 
-        if content_type == 0:
+        if content_type == 'file':
             plt.show()
             sys.exit()
         else:
@@ -719,7 +720,7 @@ class plotter(object):
 
 
 # @profile
-def main(SOMECALCS, PLOTTER, file_path, content_type):
+def main(SOMECALCS, PLOTTER, file_path, content_type, kc705_id):
 
     # -------- get a list of spills in a file --------
     T_START = time.time()
@@ -842,7 +843,7 @@ def main(SOMECALCS, PLOTTER, file_path, content_type):
 
         # -------- hitmap (mppc, pmt) --------
         heatmap_mppc_2d, heatmap_pmt_1d\
-            = SOMECALCS.get_hitmap(sig_mppc, sig_pmt)
+            = SOMECALCS.get_hitmap(sig_mppc, sig_pmt, kc705_id)
 
         # -------- hitmap (bit-filed) --------
         # number of hit to mppc, pmt and mrsync
@@ -885,43 +886,6 @@ def main(SOMECALCS, PLOTTER, file_path, content_type):
               np.count_nonzero(diff_from_mrsync_map))
         print('diff_from_mrsync_map[1540]: ', diff_from_mrsync_map[1540])
 
-        '''
-        ch_i = 0
-        for bit_i in tqdm.tqdm(range(12)):
-            # bit_iのpmtのtdcの、直前のmrsyncのtdcとの差分
-            pmt_i_minus_mrsync = np.extract((sig_pmt & (
-                1 << bit_i)) != 0, tdc_pmt) - np.extract((sig_pmt & (1 << bit_i)) != 0, mrsync_pmt)
-            print(pmt_i_minus_mrsync.dtype)
-            # -> 'i8'
-            for diff_i in np.unique(pmt_i_minus_mrsync):
-                if (diff_i >= -1500) & (diff_i <= 1500):
-                    diff_from_mrsync_map[diff_i + 1500][ch_i] += np.count_nonzero(
-                        pmt_i_minus_mrsync == diff_i)
-                elif (diff_i < -1500):
-                    UnderFlow[ch_i] += np.count_nonzero(
-                        pmt_i_minus_mrsync == diff_i)
-                else:
-                    OverFlow[ch_i] += np.count_nonzero(
-                        pmt_i_minus_mrsync == diff_i)
-            ch_i += 1
-
-        for bit_i in tqdm.tqdm(range(64)):
-            # bit_iのmppcのtdcの、直前のmrsyncのtdcとの差分
-            mppc_i_minus_mrsync = np.extract((sig_mppc & (
-                1 << bit_i)) != 0, tdc_mppc) - np.extract((sig_mppc & (1 << bit_i)) != 0, mrsync_mppc)
-            for diff_i in np.unique(mppc_i_minus_mrsync):
-                if (diff_i >= -1500) & (diff_i <= 1500):
-                    diff_from_mrsync_map[diff_i + 1500][ch_i] += np.count_nonzero(
-                        mppc_i_minus_mrsync == diff_i)
-                elif (diff_i < -1500):
-                    UnderFlow[ch_i] += np.count_nonzero(
-                        mppc_i_minus_mrsync == diff_i)
-                else:
-                    OverFlow[ch_i] += np.count_nonzero(
-                        mppc_i_minus_mrsync == diff_i)
-            ch_i += 1
-            '''
-
         T_END = time.time()
         print('TIME [s] to caliculation: ' + str(T_END - T_START))
         ######## Drawing ########
@@ -939,13 +903,12 @@ if __name__ == '__main__':
     parser = get_option()
     args = parser.parse_args()
 
-    # content_type = 0 (file), or 1 (dir)
     if args.file is not None:
         path_to_file = args.file
-        content_type = 0
+        content_type = 'file'
     elif args.dir is not None:
         path_to_directory = args.dir
-        content_type = 1
+        content_type = 'directory'
     else:
         parser.print_help()
         sys.exit()
@@ -961,11 +924,11 @@ if __name__ == '__main__':
     # 召喚
     PLOTTER = plotter()
 
-    if content_type == 0:
+    if content_type == 'file':
         buf.value = bytes(path_to_file, encoding='utf-8')
         PLOTTER.file_name = path_to_file
         print("path_to_file:", path_to_file)
-        main(SOMECALCS, PLOTTER, path_to_file, content_type)
+        main(SOMECALCS, PLOTTER, path_to_file, content_type, args.kc)
     while (True):
         while(len(PLOTTER.finder(path_to_directory)) == 0):
             print('NO FILE ;-)')
@@ -976,4 +939,4 @@ if __name__ == '__main__':
         PLOTTER.file_name = path_to_file
 
         print("path_to_file:", path_to_file)
-        main(SOMECALCS, PLOTTER, path_to_file)
+        main(SOMECALCS, PLOTTER, path_to_file, args.kc)
