@@ -1,6 +1,9 @@
 import sys
 import os
 
+# handle command line options
+from argparse import ArgumentParser
+
 # file management
 import glob
 
@@ -9,7 +12,7 @@ import numpy as np
 
 # speeding up
 import ctypes
-from numba import jit
+from numba import jit, vectorize
 
 # graphic
 import matplotlib.pyplot as plt
@@ -18,6 +21,7 @@ import matplotlib.colors as mcolors
 
 # debug
 import time
+import tqdm
 # from memory_profiler import profile
 
 ######## see .v ########################
@@ -28,120 +32,6 @@ import time
 #                                                         // COUNTER start from SPILL signal and increment with 200MHz SYSCLK
 ########################################
 
-'''
-# 1 word, bytes
-DATA_UNIT = 13
-
-# bits
-BITS_SIZE_BOARDID = 4
-BITS_SIZE_SPILLCOUNT = 16
-BITS_SIZE_EMCOUNT = 16
-BITS_SIZE_WRITECOUNT = 32
-BITS_SIZE_HEADER_UPPER = 32
-BITS_SIZE_HEADER_LOWER = 48
-BITS_SIZE_FOOTER_UPPER = 32
-BITS_SIZE_FOOTER_LOWER = 8
-
-# use for 1 word of 104 bits
-BITS_WORD_HEADER_UPPER = (0x01234567
-                          << (BITS_SIZE_SPILLCOUNT + 4 + BITS_SIZE_BOARDID + BITS_SIZE_HEADER_LOWER))
-BITS_WORD_HEADER_LOWER = 0x0123456789AB
-BITS_WORD_FOOTER_UPPER = (0xAAAAAAAA
-                          << (BITS_SIZE_SPILLCOUNT + BITS_SIZE_EMCOUNT + BITS_SIZE_WRITECOUNT + BITS_SIZE_FOOTER_LOWER))
-BITS_WORD_FOOTER_LOWER = 0xAB
-
-
-# use for 1 word of 104 bits, only the corresponding bits are filled with 1
-BITS_MASK_HEADER_UPPER = ((2 ** BITS_SIZE_HEADER_UPPER - 1)
-                          << (BITS_SIZE_SPILLCOUNT + 4 + BITS_SIZE_BOARDID + BITS_SIZE_HEADER_LOWER))
-BITS_MASK_HEADER_LOWER = 2 ** BITS_SIZE_HEADER_LOWER - 1
-BITS_MASK_FOOTER_UPPER = ((2 ** BITS_SIZE_FOOTER_UPPER - 1)
-                          << (BITS_SIZE_SPILLCOUNT + BITS_SIZE_EMCOUNT + BITS_SIZE_WRITECOUNT + BITS_SIZE_FOOTER_LOWER))
-BITS_MASK_FOOTER_LOWER = 2 ** BITS_SIZE_FOOTER_LOWER - 1
-BITS_MASK_SPILLCOUNT_HEADER = ((2 ** BITS_SIZE_SPILLCOUNT - 1)
-                               << (4 + BITS_SIZE_BOARDID + BITS_SIZE_HEADER_LOWER))
-BITS_MASK_SPILLCOUNT_FOOTER = ((2 ** BITS_SIZE_SPILLCOUNT - 1)
-                               << (BITS_SIZE_EMCOUNT + BITS_SIZE_WRITECOUNT + BITS_SIZE_FOOTER_LOWER))
-
-
-
-
-
-def header_or_not(data):
-    if((data & (BITS_MASK_HEADER_UPPER | BITS_MASK_HEADER_LOWER)) == (BITS_WORD_HEADER_UPPER | BITS_WORD_HEADER_LOWER)):
-        return True
-    else:
-        return False
-
-
-def footer_or_not(data):
-    if((data & (BITS_MASK_FOOTER_UPPER | BITS_MASK_FOOTER_LOWER)) == (BITS_WORD_FOOTER_UPPER | BITS_WORD_FOOTER_LOWER)):
-        return True
-    else:
-        return False
-
-
-def get_spillcount_header(data):
-    return ((data & BITS_MASK_SPILLCOUNT_HEADER) >> (4 + BITS_SIZE_BOARDID + BITS_SIZE_HEADER_LOWER))
-
-
-def get_spillcount_footer(data):
-    return ((data & BITS_MASK_SPILLCOUNT_FOOTER) >> (BITS_SIZE_EMCOUNT + BITS_SIZE_WRITECOUNT + BITS_SIZE_FOOTER_LOWER))
-
-def find_spills(path_to_file):
-    # 1スピル分の配列を確保するため、要はmallocの代わり
-
-    file_size = os.path.getsize(path_to_file)
-    # [spillcount] : [offset, number of data in it]
-    spillcounts_and_offsets_and_tdcnums = {}
-    # offset (in the unit of 13bytes)
-    offset = 0
-    # number of readed data (in the unit of 13bytes)
-    readed_count = 0
-
-    header_flag = False
-    with open(path_to_file, "rb") as f:
-        while (data := f.read(DATA_UNIT)):
-            data = int.from_bytes(data, 'big')
-
-            if(header_or_not(data)):
-
-                offset = readed_count
-
-                # Headerが来たら
-                spillcount_header = get_spillcount_header(data)
-                # print(spillcount_header)
-
-                header_flag = True
-
-            elif(footer_or_not(data)):
-                # Footerが来たら
-                spillcount_footer = get_spillcount_footer(data)
-                # print(spillcount_footer)
-
-                if (header_flag):
-
-                    # ヘッダーを既に読んでいれば
-                    # 0 1 2 3 4
-                    # t h t t f
-                    # offset = 1
-                    # data_num = 1 (= 4-1-1)
-                    spillcount_and_offset_and_tdcnum[spillcount_header] = [
-                        offset, readed_count - offset]
-                    header_flag = False
-
-            else:
-                pass
-
-            readed_count += 1
-
-    # print('len(spillcount_and_offset_and_tdcnum): ', len(
-    #     spillcount_and_offset_and_tdcnum), ' spills in file: ', path_to_file)
-    # print('spillcount_and_offset_and_tdcnum: ',
-    #       spillcount_and_offset_and_tdcnum)
-    return spillcount_and_offset_and_tdcnum
-'''
-
 # clock
 DELAY_BH1_TO_NEWHOD = 0
 DELAY_BH2_TO_NEWHOD = 0
@@ -151,6 +41,17 @@ DELAY_OLDHOD_TO_NEWHOD = 0
 
 # ns
 CLOCK_TIME = 5
+
+
+def get_option():
+    # define command line options
+    argparser = ArgumentParser()
+    argparser.add_argument(
+        '-d', '--dir', type=str, default=None, help='path to directory')
+    argparser.add_argument(
+        '-f', '--file', type=str, default=None, help='path to file')
+
+    return argparser
 
 
 @jit('i8[:](i8[:],i8[:])', nopython=True)
@@ -222,6 +123,63 @@ def coincidence_mrsync(tuple_foo, tuple_bar):
             i_foo += 1
 
     return tdc_coincidenced[:k_coincidenced], mrsync_coincidenced[:k_coincidenced]
+
+
+# ビットシフトをnjit関数中でufuncとして使うため
+@vectorize(['i8(u8, i8)'])
+def and_ufunc(a, b):
+    return a & b
+
+
+@jit('Tuple((u8[:,:],u8[:],u8[:]))(i8,i8,u2[:],i8[:],i8[:],u8[:,:],u8[:],u8[:])', nopython=True)
+def get_diff_from_mrsync_map_pmt(ch_start, bit_size, sig_foo, tdc_foo, mrsync_foo, diff_from_mrsync_map, underflow, overflow):
+
+    ch = ch_start
+    for bit_i in range(bit_size):
+        # chの、mrsync基準のtdc
+        tdc_from_mrsync = np.extract(
+            ((sig_foo >> bit_i) & 0b1) != 0, tdc_foo - mrsync_foo)
+        # maybe better way, anyway,
+        for diff in tdc_from_mrsync:
+            if (diff >= -1500) & (diff <= 1500):
+                diff_from_mrsync_map[diff + 1500][ch] += 1
+            elif (diff < -1500):
+                underflow[ch] += 1
+            else:
+                overflow[ch] += 1
+        ch += 1
+
+    return diff_from_mrsync_map, underflow, overflow
+
+
+# a little bit different...
+@jit('Tuple((u8[:,:],u8[:],u8[:]))(i8,i8,u8[:],i8[:],i8[:],u8[:,:],u8[:],u8[:])', nopython=True)
+def get_diff_from_mrsync_map_mppc(ch_start, bit_size, sig_foo, tdc_foo, mrsync_foo, diff_from_mrsync_map, underflow, overflow):
+
+    # print('ch_start:', ch_start)
+    ch = ch_start
+    for bit_i in range(bit_size):
+        bit_i = np.uint64(bit_i)
+        # chの、mrsync基準のtdc
+        # tdc_from_mrsync \
+        #    = np.extract(((sig_foo >> bit_i) & np.uint64(0b1)) != 0, tdc_foo) - np.extract(((sig_foo >> bit_i) & np.uint64(0b1)) != 0, mrsync_foo)
+        # print('np.count_nonzero(and_ufunc(sig_foo, (1 << bit_i))):',
+        #       np.count_nonzero(and_ufunc(sig_foo, (1 << bit_i))))
+        # print('np.unique(tdc_from_mrsync):', np.unique(tdc_from_mrsync))
+        tdc_from_mrsync = np.extract(
+            ((sig_foo >> bit_i) & np.uint64(0b1)) != 0, tdc_foo - mrsync_foo)
+        # maybe better way, anyway,
+        for diff in tdc_from_mrsync:
+            if (diff >= -1500) & (diff <= 1500):
+                diff_from_mrsync_map[diff + 1500][ch] += 1
+            elif (diff < -1500):
+                underflow[ch] += 1
+            else:
+                overflow[ch] += 1
+        ch += 1
+    # print('ch:', ch)
+
+    return diff_from_mrsync_map, underflow, overflow
 
 
 def recursion(function, arguments):
@@ -491,14 +449,14 @@ class SomeCalcs(object):
             # format to pass to imshow
             hitmap_newhod_2d = np.array(
                 [hitnum_ch_mppc[:24], hitnum_ch_mppc[24:]])
-            #print('hitmap_newhod_2d(5,6,7):', hitmap_newhod_2d.shape)
-            #print('hitmap_newhod_2d(5,6,7):', hitmap_newhod_2d)
+            # print('hitmap_newhod_2d(5,6,7):', hitmap_newhod_2d.shape)
+            # print('hitmap_newhod_2d(5,6,7):', hitmap_newhod_2d)
 
             # add brank amp. 1, 2, 3, 4
             hitmap_newhod_2d = np.insert(
                 hitmap_newhod_2d, [0], np.zeros((2, 32), dtype='i8'), axis=1)
-            #print('hitmap_newhod_2d(1,2,3,4):', hitmap_newhod_2d.shape)
-            #print('hitmap_newhod_2d(1,2,3,4):', hitmap_newhod_2d)
+            # print('hitmap_newhod_2d(1,2,3,4):', hitmap_newhod_2d.shape)
+            # print('hitmap_newhod_2d(1,2,3,4):', hitmap_newhod_2d)
 
             # add amp. 8
             hitmap_newhod_2d = np.insert(
@@ -511,8 +469,8 @@ class SomeCalcs(object):
             for ch_i, index in zip([24, 25, 26, 21, 29, 30, 31, 27], [0, 1, 2, 3, 4, 5, 6, 7]):
                 hitmap_newhod_2d[3][index*7:index*7 +
                                     7] = np.count_nonzero((sig_mppc & (1 << ch_i)) != 0)
-            #print('hitmap_newhod_2d(8):', hitmap_newhod_2d.shape)
-            #print('hitmap_newhod_2d(8):', hitmap_newhod_2d)
+            # print('hitmap_newhod_2d(8):', hitmap_newhod_2d.shape)
+            # print('hitmap_newhod_2d(8):', hitmap_newhod_2d)
 
             # add expmt
             top_expmt = np.full((2, 5), np.count_nonzero(
@@ -522,13 +480,13 @@ class SomeCalcs(object):
             hitmap_expmt_2d = np.insert(top_expmt, 2, bottom_expmt, axis=0)
             hitmap_newhod_2d = np.insert(
                 hitmap_newhod_2d, [56], hitmap_expmt_2d, axis=1)
-            #print('hitmap_newhod_2d(expmt):', hitmap_newhod_2d.shape)
-            #print('hitmap_newhod_2d(expmt):', hitmap_newhod_2d)
+            # print('hitmap_newhod_2d(expmt):', hitmap_newhod_2d.shape)
+            # print('hitmap_newhod_2d(expmt):', hitmap_newhod_2d)
 
             # add brank expmt
             hitmap_newhod_2d = np.insert(
                 hitmap_newhod_2d, [0], np.zeros((4, 5)), axis=1)
-            #print('hitmap_newhod_2d(finally):', hitmap_newhod_2d.shape)
+            # print('hitmap_newhod_2d(finally):', hitmap_newhod_2d.shape)
 
         # hitnum_ch_pmt[i]: hitnum in i-th bit(start with 0, to 11)
         hitnum_ch_pmt = np.array(
@@ -732,8 +690,13 @@ class plotter(object):
         self.ax_tdcdiff.imshow(
             ChVsDiffFromMrSync, cmap="viridis", aspect='auto', norm=norm)
 
-    def pauser(self, second):
-        plt.pause(second)
+    def pauser(self, second, content_type):
+
+        if content_type == 0:
+            plt.show()
+            sys.exit()
+        else:
+            plt.pause(second)
 
     def finder(self, path_to_directory):
         # 最新から二番目に作成されたファイルを拾ってくる
@@ -756,7 +719,7 @@ class plotter(object):
 
 
 # @profile
-def main(SOMECALCS, PLOTTER, file_path):
+def main(SOMECALCS, PLOTTER, file_path, content_type):
 
     # -------- get a list of spills in a file --------
     T_START = time.time()
@@ -804,7 +767,7 @@ def main(SOMECALCS, PLOTTER, file_path):
         sig_mppc, tdc_mppc, mrsync_mppc, \
             sig_pmt, tdc_pmt, mrsync_pmt, \
             sig_mrsync, mrsync, \
-            bookmarks \
+            bookmarks\
             = SOMECALCS.make_zeroarrays(spillcounts_and_offsets_and_tdcnums[spill_i][1])
 
         offset = np.zeros(2, dtype='i4')
@@ -832,7 +795,7 @@ def main(SOMECALCS, PLOTTER, file_path):
         # trim off the excess elements
         sig_mppc, tdc_mppc, mrsync_mppc, \
             sig_pmt, tdc_pmt, mrsync_pmt, \
-            sig_mrsync, mrsync \
+            sig_mrsync, mrsync\
             = SOMECALCS.cutoff_excess(sig_mppc, tdc_mppc, mrsync_mppc,
                                       sig_pmt, tdc_pmt, mrsync_pmt,
                                       sig_mrsync, mrsync,
@@ -845,7 +808,7 @@ def main(SOMECALCS, PLOTTER, file_path):
             tc1, mrsync_tc1, \
             tc2, mrsync_tc2, \
             oldhod, mrsync_oldhod, \
-            expmt, mrsync_expmt \
+            expmt, mrsync_expmt\
             = SOMECALCS.extrac_detectors(sig_mppc, tdc_mppc, mrsync_mppc,
                                          sig_pmt, tdc_pmt, mrsync_pmt)
 
@@ -860,25 +823,25 @@ def main(SOMECALCS, PLOTTER, file_path):
         # mrsync_newhod = how()?
 
         # -------- coincidence (p3) --------
-        newhod_coincidenced_p3 \
+        newhod_coincidenced_p3\
             = recursion(coincidence_p3,
                         tuple([newhod-0,
-                               bh1-DELAY_BH1_TO_NEWHOD, bh2-DELAY_BH2_TO_NEWHOD,
-                               tc1-DELAY_TC1_TO_NEWHOD, tc2-DELAY_TC1_TO_NEWHOD,
-                               oldhod-DELAY_OLDHOD_TO_NEWHOD]))
+                              bh1-DELAY_BH1_TO_NEWHOD, bh2-DELAY_BH2_TO_NEWHOD,
+                              tc1-DELAY_TC1_TO_NEWHOD, tc2-DELAY_TC1_TO_NEWHOD,
+                              oldhod-DELAY_OLDHOD_TO_NEWHOD]))
 
         # -------- coincidence (mrsync) --------
-        tdc_coincidenced_tmp, mrsync_coincidenced_tmp \
+        tdc_coincidenced_tmp, mrsync_coincidenced_tmp\
             = recursion(coincidence_mrsync, tuple([tuple([newhod-0, mrsync_newhod]),
-                                                   tuple(
-                                                       [bh1-DELAY_BH1_TO_NEWHOD, mrsync_bh1]), tuple([bh2-DELAY_BH2_TO_NEWHOD, mrsync_bh2]),
-                                                   tuple(
-                                                       [tc1-DELAY_TC1_TO_NEWHOD, mrsync_tc1]), tuple([tc2-DELAY_TC2_TO_NEWHOD, mrsync_tc2]),
-                                                   tuple([oldhod-DELAY_OLDHOD_TO_NEWHOD, mrsync_oldhod])]))
+                                                  tuple(
+                [bh1-DELAY_BH1_TO_NEWHOD, mrsync_bh1]), tuple([bh2-DELAY_BH2_TO_NEWHOD, mrsync_bh2]),
+                tuple(
+                [tc1-DELAY_TC1_TO_NEWHOD, mrsync_tc1]), tuple([tc2-DELAY_TC2_TO_NEWHOD, mrsync_tc2]),
+                tuple([oldhod-DELAY_OLDHOD_TO_NEWHOD, mrsync_oldhod])]))
         newhod_coincidenced_mrsync = tdc_coincidenced_tmp - mrsync_coincidenced_tmp
 
         # -------- hitmap (mppc, pmt) --------
-        heatmap_mppc_2d, heatmap_pmt_1d \
+        heatmap_mppc_2d, heatmap_pmt_1d\
             = SOMECALCS.get_hitmap(sig_mppc, sig_pmt)
 
         # -------- hitmap (bit-filed) --------
@@ -903,22 +866,38 @@ def main(SOMECALCS, PLOTTER, file_path):
         hitmap = np.insert(hitmap, hitmap.size, hit_mrsync)
 
         ######## TDC Diff from MR Sync ########
-        # 5.2us/5ns=1040だから、前後2080CLKを見れば十分、オーバーフローもアンダーフローもないはず
-        ChVsDiffFromMrSync = np.zeros((2081, 64+12), dtype='u8')
+        # 5.2us/5ns=1040だから、前後2080CLK(余裕を持って3000,前後1500)を見れば十分、オーバーフローもアンダーフローもないはず
+        diff_from_mrsync_map = np.zeros((3001, 64+12), dtype='u8')
+        diff_from_mrsync_map = np.ascontiguousarray(diff_from_mrsync_map)
         # -100, -99, -98,... 0,..., 99, 100に収まらないとき
-        OverFlow = np.zeros(64+12, dtype='u8')
-        UnderFlow = np.zeros(64+12, dtype='u8')
+        underflow = np.zeros(64+12, dtype='u8')
+        underflow = np.ascontiguousarray(underflow)
+        overflow = np.zeros(64+12, dtype='u8')
+        underflow = np.ascontiguousarray(underflow)
 
+        if mrsync_pmt.size != 0:
+            diff_from_mrsync_map, underflow, overflow = get_diff_from_mrsync_map_pmt(
+                0, 12, sig_pmt, tdc_pmt, mrsync_pmt, diff_from_mrsync_map, underflow, overflow)
+        if mrsync_mppc.size != 0:
+            diff_from_mrsync_map, underflow, overflow = get_diff_from_mrsync_map_mppc(
+                12, 64, sig_mppc, tdc_mppc, mrsync_mppc, diff_from_mrsync_map, underflow, overflow)
+        print('np.count_nonzero(diff_from_mrsync_map):',
+              np.count_nonzero(diff_from_mrsync_map))
+        print('diff_from_mrsync_map[1540]: ', diff_from_mrsync_map[1540])
+
+        '''
         ch_i = 0
-        for bit_i in range(12):
+        for bit_i in tqdm.tqdm(range(12)):
             # bit_iのpmtのtdcの、直前のmrsyncのtdcとの差分
             pmt_i_minus_mrsync = np.extract((sig_pmt & (
                 1 << bit_i)) != 0, tdc_pmt) - np.extract((sig_pmt & (1 << bit_i)) != 0, mrsync_pmt)
+            print(pmt_i_minus_mrsync.dtype)
+            # -> 'i8'
             for diff_i in np.unique(pmt_i_minus_mrsync):
-                if (diff_i >= -1040) & (diff_i <= 1040):
-                    ChVsDiffFromMrSync[diff_i + 1040][ch_i] += np.count_nonzero(
+                if (diff_i >= -1500) & (diff_i <= 1500):
+                    diff_from_mrsync_map[diff_i + 1500][ch_i] += np.count_nonzero(
                         pmt_i_minus_mrsync == diff_i)
-                elif (diff_i < -1040):
+                elif (diff_i < -1500):
                     UnderFlow[ch_i] += np.count_nonzero(
                         pmt_i_minus_mrsync == diff_i)
                 else:
@@ -926,41 +905,50 @@ def main(SOMECALCS, PLOTTER, file_path):
                         pmt_i_minus_mrsync == diff_i)
             ch_i += 1
 
-        for bit_i in range(64):
+        for bit_i in tqdm.tqdm(range(64)):
             # bit_iのmppcのtdcの、直前のmrsyncのtdcとの差分
             mppc_i_minus_mrsync = np.extract((sig_mppc & (
                 1 << bit_i)) != 0, tdc_mppc) - np.extract((sig_mppc & (1 << bit_i)) != 0, mrsync_mppc)
             for diff_i in np.unique(mppc_i_minus_mrsync):
-                if (diff_i >= -1040) & (diff_i <= 1040):
-                    ChVsDiffFromMrSync[diff_i + 1040][ch_i] += np.count_nonzero(
+                if (diff_i >= -1500) & (diff_i <= 1500):
+                    diff_from_mrsync_map[diff_i + 1500][ch_i] += np.count_nonzero(
                         mppc_i_minus_mrsync == diff_i)
-                elif (diff_i < -1040):
+                elif (diff_i < -1500):
                     UnderFlow[ch_i] += np.count_nonzero(
                         mppc_i_minus_mrsync == diff_i)
                 else:
                     OverFlow[ch_i] += np.count_nonzero(
                         mppc_i_minus_mrsync == diff_i)
             ch_i += 1
+            '''
 
         T_END = time.time()
-        print('TIME [s]: ' + str(T_END - T_START))
+        print('TIME [s] to caliculation: ' + str(T_END - T_START))
         ######## Drawing ########
         PLOTTER.reloader(newhod_coincidenced_mrsync, newhod-mrsync_newhod,
                          newhod_coincidenced_p3, newhod,
                          heatmap_mppc_2d, heatmap_pmt_1d,
-                         hitmap, ChVsDiffFromMrSync,
+                         hitmap, diff_from_mrsync_map,
                          spill_i)
-        PLOTTER.pauser(0.1)
+        PLOTTER.pauser(0.1, content_type)
 
     return
 
 
 if __name__ == '__main__':
+    parser = get_option()
+    args = parser.parse_args()
 
-    argument = sys.argv
-    path_to_directory = argument[1]
-    if (argument != 1):
-        print("USEAGE: $ python3 monitor_v2.py path_to_directory")
+    # content_type = 0 (file), or 1 (dir)
+    if args.file is not None:
+        path_to_file = args.file
+        content_type = 0
+    elif args.dir is not None:
+        path_to_directory = args.dir
+        content_type = 1
+    else:
+        parser.print_help()
+        sys.exit()
 
     # 召喚
     SOMECALCS = SomeCalcs()
@@ -972,6 +960,12 @@ if __name__ == '__main__':
 
     # 召喚
     PLOTTER = plotter()
+
+    if content_type == 0:
+        buf.value = bytes(path_to_file, encoding='utf-8')
+        PLOTTER.file_name = path_to_file
+        print("path_to_file:", path_to_file)
+        main(SOMECALCS, PLOTTER, path_to_file, content_type)
     while (True):
         while(len(PLOTTER.finder(path_to_directory)) == 0):
             print('NO FILE ;-)')
