@@ -134,6 +134,7 @@ def main(path_to_file):
     spill_count_old = -1
     bufferlabel_list = []
     recordedmrsync_list = []
+    total_hit_in_outputs_list = []
     # key: spillcount : [output_count, total_hit_in_a_spill]
     spill_info = {}
     with open(path_to_file, 'rb') as f:
@@ -147,6 +148,7 @@ def main(path_to_file):
 
                 if (spill_count_old != -1):  # 最初の一回は飛ばすため
                     # アウトプットごとの(以前のアウトプットの, 以前のヘッダーに属する)のデータを詰める
+                    total_hit_in_outputs_list.append(data_with_a_output.sum())
                     data_with_a_spill = np.append(
                         data_with_a_spill, np.array([data_with_a_output]), axis=0)
                     # 初期化
@@ -161,7 +163,7 @@ def main(path_to_file):
                     output_count = data_with_a_spill.shape[0]
                     total_hits_in_a_spill = data_with_a_spill.sum()
                     spill_info[spill_count_old] = np.array([
-                        output_count, bufferlabel_list[0:-1], recordedmrsync_list, total_hits_in_a_spill], dtype=object)
+                        output_count, bufferlabel_list[0:-1], recordedmrsync_list, total_hits_in_a_spill, total_hit_in_outputs_list], dtype=object)
 
                     if (args.graphspill == spill_count_old):
                         plot_spill(data_with_a_spill)
@@ -171,6 +173,7 @@ def main(path_to_file):
                         (0, 1088, 74), dtype=np.uint16)
                     bufferlabel_list = [bufferlabel_list[-1]]
                     recordedmrsync_list = []
+                    total_hit_in_outputs_list = []
 
                 spill_count_old = spill_count
 
@@ -186,7 +189,7 @@ def main(path_to_file):
                     output_count = data_with_a_spill.shape[0]
                     total_hits_in_a_spill = data_with_a_spill.sum()
                     spill_info[spill_count_old] = np.array([
-                        output_count, bufferlabel_list, recordedmrsync_list, total_hits_in_a_spill], dtype=object)
+                        output_count, bufferlabel_list, recordedmrsync_list, total_hits_in_a_spill, total_hit_in_outputs_list], dtype=object)
 
             else:
                 # データの場合
@@ -206,7 +209,7 @@ def main(path_to_file):
         print('\nlist of spillcount:', spill_info.keys())
         # 辞書をキーごとに表示
         print(
-            '{spillcount: [outputcount, [bufferlabel list], [recordedmrsync list], total hits in this spill]}')
+            '{spillcount: [outputcount, [bufferlabel list], [recordedmrsync list], total hits in this spill], [total hits in output list]}')
         pprint.pprint(spill_info)
 
     if args.graphtotalhit:
