@@ -15,6 +15,8 @@ from argparse import ArgumentParser
 # ofr graphic
 import numpy as np
 import matplotlib.pyplot as plt
+# log scale colorbar with imshow
+import matplotlib.colors as mcolors
 
 
 def get_option():
@@ -64,9 +66,17 @@ def plot_spill(data_with_a_spill):
 
     ax1 = fig.add_subplot(2, 1, 1)
 
+    # make log scale colorbar
+    norm_hitmap = mcolors.SymLogNorm(
+        linthresh=1, vmin=1, vmax=data_with_a_spill.sum(axis=0).T.max()*10)
+    # エントリなければ色塗らない
+    cmap_hitmap = plt.cm.viridis
+    cmap_hitmap.set_under('white')
+
     # 転置して時間を横軸に
-    ax1.imshow(data_with_a_spill.sum(axis=0).T,
-               cmap='viridis', aspect='auto', origin='lower')
+    img_imshow = ax1.imshow(data_with_a_spill.sum(axis=0).T,
+                            cmap=cmap_hitmap, aspect='auto', origin='lower', norm=norm_hitmap, interpolation='none')
+    fig.colorbar(img_imshow, label='Number of Hits', orientation='vertical')
     ax1.set_title('spillcount:' + str(args.graphspill))
     ax1.set_xlabel('CLK')
     ax1.set_ylabel('bit-fields')
