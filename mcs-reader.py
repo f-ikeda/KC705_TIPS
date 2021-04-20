@@ -112,7 +112,7 @@ def plot_totalhit(spill_info):
 
     ax1 = fig.add_subplot(1, 1, 1)
     x_range = range(len(spill_info))
-    y = np.array([info[-1] for info in list(spill_info.values())])
+    y = np.array([info[-2] for info in list(spill_info.values())])
     entries = y.sum()
     ax1.step(x_range, y, where='post', label='Entries:' + str(entries))
 
