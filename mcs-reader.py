@@ -35,7 +35,9 @@ def get_option():
     argparser.add_argument(
         '-gt', '--graphtotalhit', action='store_true', help='draw graph of total hits for each spill')
     argparser.add_argument(
-        '-ot', '--output', type=int, help='draw graph of recorded mrsyncs for each output of certain spillcount')
+        '-ot', '--output', type=int, help='draw graph of recorded mrsyncs and total hits for each output of certain spillcount')
+    argparser.add_argument(
+        '-df', '--outputdiff', action='store_true', help='with -ot, draw hist of diff recorded mrsyncs and total hits for each output of certain spillcount')
     argparser.add_argument(
         '-if', '--skip', action='store_true', help='draw graph with skip initial and final spills with -gt')
 
@@ -152,33 +154,66 @@ def plot_totalhit(spill_info):
     sys.exit()
 
 
-def plot_mrsyncs(spill_info):
+def plot_mrsyncs(spill_info, spillcount):
 
     fig = plt.figure(figsize=(8, 6))
     plt.subplots_adjust(wspace=0.4, hspace=0.6)
 
-    ax1 = fig.add_subplot(1, 1, 1)
+    ax1 = fig.add_subplot(2, 1, 1)
     outputcount = spill_info[0]
-    print(outputcount)
     x = range(1, outputcount+1)
-    y = np.array(spill_info[-4])
-    entries = y.sum()
-    ax1.step(x, y, where='post', label='Entries:' + str(entries))
+    # recorded mrsyncs lists(/output)
+    y1 = np.array(spill_info[-4])
+    entries_y1 = y1.sum()
+    ax1.step(x, y1, 'C0', where='post', label='#RecordedMRSync' +
+             '\nTotal/spill:' + str(entries_y1))
 
-    # print entires for each spill
-    for i in range(len(x)):
-        ax1.text(x[i], y.max() * 2, str(y[i]), size='small')
+    # recorded totalhits lists(/output)
+    ax2 = ax1.twinx()
+    y2 = np.array(spill_info[-1])
+    entries_y2 = y2.sum()
+    ax2.step(x, y2, 'C1', where='post', label='hits' + '\nTotal/spill:' +
+             str(entries_y2) + '\nTotal outputs times:' + str(outputcount))
 
-    ax1.set_ylim(0, y.max() * 1.2)
+    ax1.set_ylim(0, y1.max() * 1.2)
+    ax2.set_ylim(0, y2.max() * 1.2)
 
     ax1.grid(axis="y")
     ax1.minorticks_on()
     ax1.grid(which="both", axis="x")
 
-    ax1.legend()
-    ax1.set_title('outputcounts vs. #RecordedMRSync')
+    # legend
+    h1, l1 = ax1.get_legend_handles_labels()
+    h2, l2 = ax2.get_legend_handles_labels()
+    ax1.legend(h1+h2, l1+l2, loc='lower right')
+
+    ax1.set_title('spillcount:' + str(spillcount) +
+                  '\noutputcounts vs. #RecordedMRSync, hits/output')
     ax1.set_xlabel('output times')
-    ax1.set_ylabel('#RecordedMRSync')
+    ax1.set_ylabel('Entiries (#RecordedMRSync)')
+    ax2.set_ylabel('Entiries (hits)')
+
+    if args.outputdiff:
+        ax3 = fig.add_subplot(2, 2, 3)
+        ax4 = fig.add_subplot(2, 2, 4)
+
+        y1_diff = np.diff(np.array(y1))
+        ax3.hist(y1_diff, bins=50, log=True)
+        ax3.set_title('diff of #RecordedMRSync between outputs')
+        ax3.set_ylabel('Entiries')
+
+        ax3.grid(axis="y")
+        ax3.minorticks_on()
+        ax3.grid(which="both", axis="x")
+
+        y2_diff = np.diff(np.array(y2, dtype='i8'))
+        ax4.hist(y2_diff, bins=50, log=True)
+        ax4.set_title('diff of hits/output between outputs')
+        ax4.set_ylabel('Entiries')
+
+        ax4.grid(axis="y")
+        ax4.minorticks_on()
+        ax4.grid(which="both", axis="x")
 
     plt.show()
     sys.exit()
@@ -231,7 +266,8 @@ def main(path_to_file):
                     if (args.graphspill == spill_count_old):
                         plot_spill(data_with_a_spill)
                     if (args.output == spill_count_old):
-                        plot_mrsyncs(spill_info[spill_count_old])
+                        plot_mrsyncs(
+                            spill_info[spill_count_old], spill_count_old)
 
                     # &初期化
                     data_with_a_spill = np.empty(
