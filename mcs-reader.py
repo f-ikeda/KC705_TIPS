@@ -34,6 +34,10 @@ def get_option():
                            help='draw graph of certain channel, use with -gs')
     argparser.add_argument(
         '-gt', '--graphtotalhit', action='store_true', help='draw graph of total hits for each spill')
+    argparser.add_argument(
+        '-ot', '--output', type=int, help='draw graph of recorded mrsyncs for each output of certain spillcount')
+    argparser.add_argument(
+        '-if', '--skip', action='store_true', help='draw graph with skip initial and final spills with -gt')
 
     return argparser.parse_args()
 
@@ -61,6 +65,7 @@ class bit:
 
 
 def plot_spill(data_with_a_spill):
+
     fig = plt.figure(figsize=(8, 6))
     plt.subplots_adjust(wspace=0.4, hspace=0.6)
 
@@ -73,10 +78,13 @@ def plot_spill(data_with_a_spill):
     cmap_hitmap = plt.cm.viridis
     cmap_hitmap.set_under('white')
 
+    entiries = data_with_a_spill.sum(axis=0).T.sum()
+
     # 転置して時間を横軸に
     img_imshow = ax1.imshow(data_with_a_spill.sum(axis=0).T,
                             cmap=cmap_hitmap, aspect='auto', origin='lower', norm=norm_hitmap, interpolation='none')
-    fig.colorbar(img_imshow, label='Number of Hits', orientation='vertical')
+    fig.colorbar(img_imshow, label='Entiries:' +
+                 str(entiries), orientation='vertical')
     ax1.set_title('spillcount:' + str(args.graphspill))
     ax1.set_xlabel('CLK')
     ax1.set_ylabel('bit-fields')
@@ -86,9 +94,9 @@ def plot_spill(data_with_a_spill):
         x_range = data_with_a_spill.sum(axis=0).T.shape[1]
         y = data_with_a_spill.sum(
             axis=0).T[args.channel]
-        entries = y.sum()
+        entries_ch = y.sum()
         ax2.step(np.arange(x_range) * 5, y, where='post',
-                 label='Entries:' + str(entries))
+                 label='Entries:' + str(entries_ch))
         ax2.set_yscale('log')
         ax2.set_ylim(0.1, y.max() * 10)
 
@@ -107,14 +115,26 @@ def plot_spill(data_with_a_spill):
 
 def plot_totalhit(spill_info):
 
+    if args.skip:
+        first_key = next(iter(spill_info), None)
+        del spill_info[first_key]
+        last_key = next(reversed(spill_info), None)
+        del spill_info[last_key]
+
     fig = plt.figure(figsize=(8, 6))
     plt.subplots_adjust(wspace=0.4, hspace=0.6)
 
     ax1 = fig.add_subplot(1, 1, 1)
-    x_range = range(len(spill_info))
+    x = []
+    for key in spill_info.keys():
+        x.append(key)
     y = np.array([info[-2] for info in list(spill_info.values())])
     entries = y.sum()
-    ax1.step(x_range, y, where='post', label='Entries:' + str(entries))
+    ax1.step(x, y, where='post', label='Entries:' + str(entries))
+
+    # print entires for each spill
+    for i in range(len(x)):
+        ax1.text(x[i], y.max() * 2, str(y[i]), size='small')
 
     ax1.set_yscale('log')
     ax1.set_ylim(0.1, y.max() * 10)
@@ -127,6 +147,38 @@ def plot_totalhit(spill_info):
     ax1.set_title('spillcount vs. total hits')
     ax1.set_xlabel('spillcount')
     ax1.set_ylabel('Entries')
+
+    plt.show()
+    sys.exit()
+
+
+def plot_mrsyncs(spill_info):
+
+    fig = plt.figure(figsize=(8, 6))
+    plt.subplots_adjust(wspace=0.4, hspace=0.6)
+
+    ax1 = fig.add_subplot(1, 1, 1)
+    outputcount = spill_info[0]
+    print(outputcount)
+    x = range(1, outputcount+1)
+    y = np.array(spill_info[-4])
+    entries = y.sum()
+    ax1.step(x, y, where='post', label='Entries:' + str(entries))
+
+    # print entires for each spill
+    for i in range(len(x)):
+        ax1.text(x[i], y.max() * 2, str(y[i]), size='small')
+
+    ax1.set_ylim(0, y.max() * 1.2)
+
+    ax1.grid(axis="y")
+    ax1.minorticks_on()
+    ax1.grid(which="both", axis="x")
+
+    ax1.legend()
+    ax1.set_title('outputcounts vs. #RecordedMRSync')
+    ax1.set_xlabel('output times')
+    ax1.set_ylabel('#RecordedMRSync')
 
     plt.show()
     sys.exit()
@@ -178,6 +230,8 @@ def main(path_to_file):
 
                     if (args.graphspill == spill_count_old):
                         plot_spill(data_with_a_spill)
+                    if (args.output == spill_count_old):
+                        plot_mrsyncs(spill_info[spill_count_old])
 
                     # &初期化
                     data_with_a_spill = np.empty(
@@ -222,7 +276,7 @@ def main(path_to_file):
         print('\nlist of spillcount:', spill_info.keys())
         # 辞書をキーごとに表示
         print(
-            '{spillcount: [outputcount, [bufferlabel list], [recordedmrsync list], [e.m. list], total hits in this spill], [total hits in output list]}')
+            '{spillcount: [outputcount, [bufferlabel list], [recordedmrsync list], [e.m. list], total hits in this spill, [total hits in output list]]}')
         pprint.pprint(spill_info)
 
     if args.graphtotalhit:
