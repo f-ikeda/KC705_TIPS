@@ -164,16 +164,16 @@ def plot_mrsyncs(spill_info, spillcount):
     x = range(1, outputcount+1)
     # recorded mrsyncs lists(/output)
     y1 = np.array(spill_info[-4])
-    entries_y1 = y1.sum()
+    entries_y1 = y1[-1]
     ax1.step(x, y1, 'C0', where='post', label='#RecordedMRSync' +
-             '\nTotal/spill:' + str(entries_y1))
+             '\nTotal/spill:' + str(entries_y1), alpha=0.6)
 
     # recorded totalhits lists(/output)
     ax2 = ax1.twinx()
     y2 = np.array(spill_info[-1])
     entries_y2 = y2.sum()
     ax2.step(x, y2, 'C1', where='post', label='hits' + '\nTotal/spill:' +
-             str(entries_y2) + '\nTotal outputs times:' + str(outputcount))
+             str(entries_y2) + '\nTotal outputs times:' + str(outputcount), alpha=0.6)
 
     ax1.set_ylim(0, y1.max() * 1.2)
     ax2.set_ylim(0, y2.max() * 1.2)
@@ -220,6 +220,9 @@ def plot_mrsyncs(spill_info, spillcount):
 
 
 def main(path_to_file):
+    # bytes
+    readed_size = 0
+
     # macで必要
     bit.DATA_TYPE = bit.DATA_TYPE.newbyteorder('>')
 
@@ -239,6 +242,7 @@ def main(path_to_file):
         while f.tell() != os.path.getsize(path_to_file):
 
             bytearray_1word = f.read(bit.SIZE_HEADER)
+            readed_size += bit.SIZE_HEADER
             int_1word = int.from_bytes(bytearray_1word, 'big')
 
             if ((int_1word >> (4 * 8)) == bit.HEADER_MAGICWORD):
@@ -284,7 +288,8 @@ def main(path_to_file):
                 em_list.append((int_1word >> 32) & 0xFFFF)
                 recordedmrsync_list.append(int_1word & 0xFFFFFFFF)
 
-                if (f.tell == os.path.getsize(path_to_file)):
+                # f.tell() == os.path.getsize(path_to_file) method doesnt work
+                if (readed_size == os.path.getsize(path_to_file)):
                     # 最後の最後に限りここでアウトプットごとのデータを詰める(次のヘッダーがないから)
                     data_with_a_spill = np.append(
                         data_with_a_spill, np.array([data_with_a_output]), axis=0)
@@ -297,8 +302,10 @@ def main(path_to_file):
             else:
                 # データの場合
                 f.seek(-1 * bit.SIZE_HEADER, 1)
+                readed_size -= bit.SIZE_HEADER
                 # relative timeごとのデータを詰める
                 bytearray_data = f.read(bit.SIZE_DATA)
+                readed_size += bit.SIZE_DATA
                 data = np.frombuffer(bytearray_data, bit.DATA_TYPE)
                 data_with_a_output = np.vstack((data_with_a_output, data))
 
