@@ -18,6 +18,25 @@ import matplotlib.pyplot as plt
 # log scale colorbar with imshow
 import matplotlib.colors as mcolors
 
+# オプションによっては、最後のスピルを表示できないかも(-gsと同様に対処)
+
+
+class pycolor:
+    # use as print(pycolor.RED, 'foo', pycolor.END)
+    BLACK = '\033[30m'
+    RED = '\033[31m'
+    GREEN = '\033[32m'
+    YELLOW = '\033[33m'
+    BLUE = '\033[34m'
+    PURPLE = '\033[35m'
+    CYAN = '\033[36m'
+    WHITE = '\033[37m'
+    RETURN = '\033[07m'
+    ACCENT = '\033[01m'
+    FLASH = '\033[05m'
+    RED_FLASH = '\033[05;41m'
+    END = '\033[0m'
+
 
 def get_option():
     # define command line options
@@ -75,7 +94,7 @@ def plot_spill(data_with_a_spill):
 
     # make log scale colorbar
     norm_hitmap = mcolors.SymLogNorm(
-        linthresh=1, vmin=1, vmax=data_with_a_spill.sum(axis=0).T.max()*10)
+        linthresh=1, vmin=0.8, vmax=data_with_a_spill.sum(axis=0).T.max()*10)
     # エントリなければ色塗らない
     cmap_hitmap = plt.cm.viridis
     cmap_hitmap.set_under('white')
@@ -130,7 +149,7 @@ def plot_totalhit(spill_info):
     x = []
     for key in spill_info.keys():
         x.append(key)
-    y = np.array([info[-2] for info in list(spill_info.values())])
+    y = np.array([info[-3] for info in list(spill_info.values())])
     entries = y.sum()
     ax1.step(x, y, where='post', label='Entries:' + str(entries))
 
@@ -163,14 +182,14 @@ def plot_mrsyncs(spill_info, spillcount):
     outputcount = spill_info[0]
     x = range(1, outputcount+1)
     # recorded mrsyncs lists(/output)
-    y1 = np.array(spill_info[-4])
+    y1 = np.array(spill_info[-5])
     entries_y1 = y1[-1]
     ax1.step(x, y1, 'C0', where='post', label='#RecordedMRSync' +
              '\nTotal/spill:' + str(entries_y1), alpha=0.6)
 
     # recorded totalhits lists(/output)
     ax2 = ax1.twinx()
-    y2 = np.array(spill_info[-1])
+    y2 = np.array(spill_info[-2])
     entries_y2 = y2.sum()
     ax2.step(x, y2, 'C1', where='post', label='hits' + '\nTotal/spill:' +
              str(entries_y2) + '\nTotal outputs times:' + str(outputcount), alpha=0.6)
@@ -228,6 +247,7 @@ def main(path_to_file):
 
     # アウトプットごとの情報
     data_with_a_output = np.zeros((0, 74), dtype=np.uint16)
+    hit_ch_list = np.empty(0, dtype=np.uint16)
     # スピルごとの情報
     data_with_a_spill = np.empty((0, 1088, 74), dtype=np.uint16)
     spill_count = -1
@@ -236,6 +256,7 @@ def main(path_to_file):
     recordedmrsync_list = []
     em_list = []
     total_hit_in_outputs_list = []
+    hit_ch_unique = np.empty(0, dtype=np.uint16)
     # key: spillcount : [output_count, total_hit_in_a_spill]
     spill_info = {}
     with open(path_to_file, 'rb') as f:
@@ -251,10 +272,13 @@ def main(path_to_file):
                 if (spill_count_old != -1):  # 最初の一回は飛ばすため
                     # アウトプットごとの(以前のアウトプットの, 以前のヘッダーに属する)のデータを詰める
                     total_hit_in_outputs_list.append(data_with_a_output.sum())
+                    hit_ch_unique = np.insert(
+                        hit_ch_unique, hit_ch_unique.size, hit_ch_list)
                     data_with_a_spill = np.append(
                         data_with_a_spill, np.array([data_with_a_output]), axis=0)
                     # 初期化
                     data_with_a_output = np.empty((0, 74), dtype=np.uint16)
+                    hit_ch_list = np.empty(0, dtype=np.uint16)
 
                 bufferlabel_list.append((int_1word >> 16) & 0b1111)
                 spill_count = (int_1word & 0xFF)
@@ -265,7 +289,7 @@ def main(path_to_file):
                     output_count = data_with_a_spill.shape[0]
                     total_hits_in_a_spill = data_with_a_spill.sum()
                     spill_info[spill_count_old] = np.array([
-                        output_count, bufferlabel_list[0:-1], recordedmrsync_list, em_list, total_hits_in_a_spill, total_hit_in_outputs_list], dtype=object)
+                        output_count, bufferlabel_list[0:-1], recordedmrsync_list, em_list, total_hits_in_a_spill, total_hit_in_outputs_list, list(set(hit_ch_unique))], dtype=object)
 
                     if (args.graphspill == spill_count_old):
                         plot_spill(data_with_a_spill)
@@ -280,6 +304,7 @@ def main(path_to_file):
                     recordedmrsync_list = []
                     em_list = []
                     total_hit_in_outputs_list = []
+                    hit_ch_unique = np.empty(0, dtype=np.uint16)
 
                 spill_count_old = spill_count
 
@@ -293,11 +318,17 @@ def main(path_to_file):
                     # 最後の最後に限りここでアウトプットごとのデータを詰める(次のヘッダーがないから)
                     data_with_a_spill = np.append(
                         data_with_a_spill, np.array([data_with_a_output]), axis=0)
+                    total_hit_in_outputs_list.append(data_with_a_output.sum())
+                    hit_ch_unique = np.insert(
+                        hit_ch_unique, hit_ch_unique.size, hit_ch_list)
                     # 最後の最後に限りここでスピルごとのデータを詰める(次のヘッダーがないから)
                     output_count = data_with_a_spill.shape[0]
                     total_hits_in_a_spill = data_with_a_spill.sum()
                     spill_info[spill_count_old] = np.array([
-                        output_count, bufferlabel_list, recordedmrsync_list, em_list, total_hits_in_a_spill, total_hit_in_outputs_list], dtype=object)
+                        output_count, bufferlabel_list, recordedmrsync_list, em_list, total_hits_in_a_spill, total_hit_in_outputs_list, list(set(hit_ch_unique))],  dtype=object)
+
+                    if (args.graphspill == spill_count_old):
+                        plot_spill(data_with_a_spill)
 
             else:
                 # データの場合
@@ -308,19 +339,39 @@ def main(path_to_file):
                 readed_size += bit.SIZE_DATA
                 data = np.frombuffer(bytearray_data, bit.DATA_TYPE)
                 data_with_a_output = np.vstack((data_with_a_output, data))
+                hit_ch_list = np.insert(
+                    hit_ch_list, hit_ch_list.size, np.nonzero(data)[0])
 
                 if args.nonzero and (np.count_nonzero(data != 0)):
                     # ヒットがあった場合のみアウトプットごとに情報表示モード
                     print('spillcount:', 'output no.:', 'bufferlabel', 'relative time(ns):', 'total hits:',
                           spill_count,  data_with_a_spill.shape[0] + 1, bufferlabel_list[-1],  data_with_a_output.shape[0] * 5, data.sum())
 
+    '''
     if args.spillinfo:
         # 全部読み切ったら
         print('\nlist of spillcount:', spill_info.keys())
         # 辞書をキーごとに表示
         print(
-            '{spillcount: [outputcount, [bufferlabel list], [recordedmrsync list], [e.m. list], total hits in this spill, [total hits in output list]]}')
+            '{spillcount: [outputcount, [bufferlabel list], [recordedmrsync list], [e.m. list], total hits in this spill, [total hits in output list], [hit chs]]}')
         pprint.pprint(spill_info)
+    '''
+
+    if args.spillinfo:
+        print('\nlist of spillcount:', spill_info.keys())
+        for spill_i in spill_info.keys():
+            # 辞書をキーごとに表示
+            print(pycolor.RED, '-------- -------- soillcount:',
+                  spill_i, pycolor.END)
+            print(pycolor.GREEN, 'hits/spill:',
+                  spill_info[spill_i][4], pycolor.END)
+            print(pycolor.BLUE, 'hits chs list:',
+                  spill_info[spill_i][6], pycolor.END)
+            print('outputcount:', spill_info[spill_i][0])
+            print('recordedmrsync:', spill_info[spill_i][2])
+            print('hits/output:', spill_info[spill_i][5])
+            print('bufferlabel:', spill_info[spill_i][1])
+            print('e.m.:', spill_info[spill_i][3])
 
     if args.graphtotalhit:
         plot_totalhit(spill_info)
@@ -330,5 +381,5 @@ if __name__ == '__main__':
     args = get_option()
 
     path_to_file = args.file
-    print('path_to_file:', path_to_file)
+    print(pycolor.CYAN, 'path_to_file:', path_to_file, pycolor.END)
     main(path_to_file)
