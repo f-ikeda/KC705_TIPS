@@ -21,7 +21,7 @@ import matplotlib.colors as mcolors
 
 # debug
 import time
-import tqdm
+# import tqdm
 # from memory_profiler import profile
 
 ######## see .v ########################
@@ -145,9 +145,9 @@ def get_diff_from_mrsync_map_pmt(ch_start, bit_size, sig_foo, tdc_foo, mrsync_fo
             ((sig_foo >> bit_i) & 0b1) != 0, tdc_foo - mrsync_foo)
         # maybe better way, anyway,
         for diff in tdc_from_mrsync:
-            if (diff >= -1500) & (diff <= 1500):
-                diff_from_mrsync_map[diff + 1500][ch] += 1
-            elif (diff < -1500):
+            if (diff >= 0) & (diff <= 1200):
+                diff_from_mrsync_map[diff][ch] += 1
+            elif (diff < 0):
                 underflow[ch] += 1
             else:
                 overflow[ch] += 1
@@ -603,7 +603,7 @@ class plotter(object):
         self.ax_chmap_mppc.yaxis.set_ticklabels([])
         # make log scale colorbar
         norm_chmap = mcolors.SymLogNorm(
-            linthresh=1, vmin=1, vmax=hitmap_newhod_2d.max()*10)
+            linthresh=1, vmin=0.8, vmax=hitmap_newhod_2d.max()*10)
         cmap_chmap = plt.cm.viridis
         # entry 0 = white
         cmap_chmap.set_under('white')
@@ -692,7 +692,7 @@ class plotter(object):
 
         # make log scale colorbar
         norm_bit = mcolors.SymLogNorm(
-            linthresh=1, vmin=1, vmax=ChVsDiffFromMrSync.max()*10)
+            linthresh=1, vmin=0.8, vmax=ChVsDiffFromMrSync.max()*10)
         cmap_bit = plt.cm.viridis
         # entry 0 = white
         cmap_bit.set_under('white')
@@ -878,10 +878,11 @@ def main(SOMECALCS, PLOTTER, file_path, content_type, kc705_id):
         hitmap = np.insert(hitmap, hitmap.size, hit_mrsync)
 
         ######## TDC Diff from MR Sync ########
-        # 5.2us/5ns=1040だから、前後2080CLK(余裕を持って3000,前後1500)を見れば十分、オーバーフローもアンダーフローもないはず
-        diff_from_mrsync_map = np.zeros((3001, 64+12), dtype='u8')
+        # 6us(/5ns=1200)だから、MRSyncから1200CLKを見れば十分、オーバーフローもアンダーフローもないはず
+        clk_range = 1200
+        diff_from_mrsync_map = np.zeros((clk_range, 64+12), dtype='u8')
         diff_from_mrsync_map = np.ascontiguousarray(diff_from_mrsync_map)
-        # -100, -99, -98,... 0,..., 99, 100に収まらないとき
+        # 0,..., 1198, 1199に収まらないとき
         underflow = np.zeros(64+12, dtype='u8')
         underflow = np.ascontiguousarray(underflow)
         overflow = np.zeros(64+12, dtype='u8')
@@ -893,9 +894,8 @@ def main(SOMECALCS, PLOTTER, file_path, content_type, kc705_id):
         if mrsync_mppc.size != 0:
             diff_from_mrsync_map, underflow, overflow = get_diff_from_mrsync_map_mppc(
                 12, 64, sig_mppc, tdc_mppc, mrsync_mppc, diff_from_mrsync_map, underflow, overflow)
-        print('np.count_nonzero(diff_from_mrsync_map):',
-              np.count_nonzero(diff_from_mrsync_map))
-        print('diff_from_mrsync_map[1540]: ', diff_from_mrsync_map[1540])
+        # print('np.count_nonzero(diff_from_mrsync_map):', np.count_nonzero(diff_from_mrsync_map))
+        # print('diff_from_mrsync_map[0]: ', diff_from_mrsync_map[0])
 
         T_END = time.time()
         print('TIME [s] to caliculation: ' + str(T_END - T_START))
