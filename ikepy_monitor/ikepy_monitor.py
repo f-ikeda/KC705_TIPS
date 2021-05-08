@@ -52,8 +52,6 @@ def get_option():
         '-f', '--file', type=str, default=None, help='path to file')
     argparser.add_argument(
         '-k', '--kc', type=int, default=1, help='select KC705-(1 or 2)')
-    argparser.add_argument(
-        '-p', '--pc', type=int, default=1, help='select caolila(1) or cometdaq03(2)')
 
     return argparser
 
@@ -145,7 +143,7 @@ def get_diff_from_mrsync_map_pmt(ch_start, bit_size, sig_foo, tdc_foo, mrsync_fo
             ((sig_foo >> bit_i) & 0b1) != 0, tdc_foo - mrsync_foo)
         # maybe better way, anyway,
         for diff in tdc_from_mrsync:
-            if (diff >= 0) & (diff <= 1200):
+            if (diff >= 0) & (diff < 1200):
                 diff_from_mrsync_map[diff][ch] += 1
             elif (diff < 0):
                 underflow[ch] += 1
@@ -707,23 +705,17 @@ class plotter(object):
         else:
             plt.pause(second)
 
-    def finder(self, path_to_directory, daq_pc):
+    def finder(self, path_to_directory):
         # 最新から二番目に作成されたファイルを拾ってくる
+        # [older, old, new, newer]
         list_of_files = glob.glob(path_to_directory+'*')
         # print('list_of_files:', list_of_files)
-        latest_two_file = sorted(
-            list_of_files, key=os.path.getctime, reverse=True)[:2]
+        # [new, newer]
+        latest_two_file = list_of_files[-2:]
         # print('latest_two_file:', latest_two_file)
 
-        if(len(latest_two_file[1:2]) > 0):
-            # in cometdaq03(2): latest_two_file: [old, new]
-            # so, path_to_file = latest_two_file[0]
-            # in caolila(1): latest_two_file: [new, old]
-            # so, path_to_file = latest_two_file[1]
-            if daq_pc == 1:
-                path_to_file = latest_two_file[1]
-            else:
-                path_to_file = latest_two_file[0]
+        if(len(latest_two_file) == 2):
+            path_to_file = latest_two_file[0]
             self.file_name = path_to_file
             return path_to_file
         else:
@@ -941,11 +933,11 @@ if __name__ == '__main__':
         print("path_to_file:", path_to_file)
         main(SOMECALCS, PLOTTER, path_to_file, content_type, args.kc)
     while (True):
-        while(len(PLOTTER.finder(path_to_directory, args.pc)) == 0):
+        while(len(PLOTTER.finder(path_to_directory)) == 0):
             print('NO FILE ;-)')
             time.sleep(0.3)
 
-        path_to_file = PLOTTER.finder(path_to_directory, args.pc)
+        path_to_file = PLOTTER.finder(path_to_directory)
         buf.value = bytes(path_to_file, encoding='utf-8')
         PLOTTER.file_name = path_to_file
 
