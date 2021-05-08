@@ -281,7 +281,7 @@ def main(path_to_file):
                     hit_ch_list = np.empty(0, dtype=np.uint16)
 
                 bufferlabel_list.append((int_1word >> 16) & 0b1111)
-                spill_count = (int_1word & 0xFF)
+                spill_count = (int_1word & 0xFFFF)
                 if (spill_count != spill_count_old) and (spill_count_old != -1):
 
                     # 新しいスピルになったら
