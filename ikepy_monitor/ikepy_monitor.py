@@ -18,6 +18,9 @@ from numba import jit, vectorize
 import matplotlib.pyplot as plt
 # log scale colorbar with imshow
 import matplotlib.colors as mcolors
+# make thicks as integer
+import matplotlib.ticker as ticker
+
 
 # debug
 import time
@@ -172,9 +175,9 @@ def get_diff_from_mrsync_map_mppc(ch_start, bit_size, sig_foo, tdc_foo, mrsync_f
             ((sig_foo >> bit_i) & np.uint64(0b1)) != 0, tdc_foo - mrsync_foo)
         # maybe better way, anyway,
         for diff in tdc_from_mrsync:
-            if (diff >= -1500) & (diff <= 1500):
-                diff_from_mrsync_map[diff + 1500][ch] += 1
-            elif (diff < -1500):
+            if (diff >= 0) & (diff < 1200):
+                diff_from_mrsync_map[diff][ch] += 1
+            elif (diff < 0):
                 underflow[ch] += 1
             else:
                 overflow[ch] += 1
@@ -515,7 +518,7 @@ class plotter(object):
 
     def initializer(self):
         # タイトルと文字サイズ
-        self.fig.suptitle('monitor' + '\n' + 'file: ' +
+        self.fig.suptitle('ikepymonitor' + '\n' + 'file: ' +
                           self.file_name, size=10)
         self.fig.subplots_adjust(
             left=0.10, right=0.90, top=0.90, bottom=0.10, wspace=0.4, hspace=0.4)
@@ -546,50 +549,76 @@ class plotter(object):
         self.colorbar_chmap_pmt = self.fig.colorbar(
             self.img_chmap_pmt, label='Number of Hits', orientation='horizontal')
 
-        ######## Hit Map (Bit-Field) ########
-        self.ax_hitmap = plt.subplot2grid((3, 2), (0, 0))
+        ######## Hit Map (Bit-Field, PMT) ########
+        self.ax_hitmap_mr_and_pmt = plt.subplot2grid((3, 4), (0, 0))
 
-        ######## TDC Diff from MR Sync ########
-        self.ax_tdcdiff = plt.subplot2grid((3, 2), (1, 0))
+        ######## Hit Map (Bit-Field, MPPC) ########
+        self.ax_hitmap_mppc = plt.subplot2grid((3, 4), (0, 1))
 
-    def reloader(self, tdc_mrsync_w_coinci, tdc_mrsync_wo_coinci, tdc_p3_w_coinci, tdc_p3_wo_coinci, hitmap_newhod_2d, hitnum_ch_pmt, hitmap, ChVsDiffFromMrSync, spillcount):
-        self.fig.suptitle('monitor' + '\n' + 'file: ' +
+        ######## TDC Diff from MR Sync (PMT) ########
+        self.ax_tdcdiff_pmt = plt.subplot2grid((3, 4), (1, 0))
+
+        ######## TDC Diff from MR Sync (MPPC) ########
+        self.ax_tdcdiff_mppc = plt.subplot2grid((3, 4), (1, 1))
+
+    def reloader(self, tdc_mrsync_w_coinci, tdc_mrsync_wo_coinci, tdc_p3_w_coinci, tdc_p3_wo_coinci, hitmap_newhod_2d, hitnum_ch_pmt, hitmap_mr_and_pmt, hitmap_mppc, ChVsDiffFromMrSync_PMT, ChVsDiffFromMrSync_MPPC, spillcount, kc705_id):
+        self.fig.suptitle('ikepymonitor' + '\n' + 'file: ' +
                           self.file_name, size=10)
+
+        if kc705_id == 1:
+            textlabel = ['BH1', 'BH2', 'TC1', 'TC2', 'OldPMT00|01|02', 'OldPMT03',
+                         'OldPMT04', 'OldPMT05', 'OldPMT06', 'OldPMT07', 'Ext.PMT129', 'Ext.PMT131']
+        else:
+            textlabel = ['BH1', 'BH2', 'TC1', 'TC2', 'OldPMT15|14|13',  'OldPMT12',
+                         'OldPMT11', 'OldPMT10', 'OldPMT09', 'OldPMT08', 'Ext.PMT130', 'Ext.PMT132']
+
+        if hitmap_newhod_2d.max() > hitnum_ch_pmt.max():
+            max_bin = hitmap_newhod_2d.max()
+        elif hitmap_newhod_2d.max() <= hitnum_ch_pmt.max():
+            max_bin = hitnum_ch_pmt.max()
+        elif ChVsDiffFromMrSync_PMT.max() > ChVsDiffFromMrSync_MPPC.max():
+            max_bin = ChVsDiffFromMrSync_PMT.max()
+        elif ChVsDiffFromMrSync_PMT.max() <= ChVsDiffFromMrSync_MPPC.max():
+            max_bin = ChVsDiffFromMrSync_MPPC.max()
 
         ######## Coincidence (MR Sync) ########
         self.ax_mrsync.cla()
         self.ax_mrsync.set_title(
-            'TDC from MR Sync: ' + 'Spill No.' + str(spillcount))
+            'TDC from MR Sync: ' + 'Spill No.' + str(spillcount), loc='left')
         self.ax_mrsync.set_xlabel('time from MR Sync [us]')
         self.ax_mrsync.set_ylabel('events/bin')
         self.ax_mrsync.grid(True)
         self.lines_mrsync = self.ax_mrsync.hist(
-            tdc_mrsync_w_coinci*CLOCK_TIME*pow(10, -3),
-            bins=250, histtype='step', log=True, label='w/ coincidence', alpha=0.8, color='coral')
-        self.lines_mrsync = self.ax_mrsync.hist(
             tdc_mrsync_wo_coinci*CLOCK_TIME*pow(10, -3),
             bins=250, histtype='step', log=True, label='wo coincidence', alpha=0.8, color='dodgerblue')
+        self.lines_mrsync = self.ax_mrsync.hist(
+            tdc_mrsync_w_coinci*CLOCK_TIME*pow(10, -3),
+            bins=250, histtype='step', log=True, label='w/ coincidence', alpha=0.8, color='maroon')
         # y軸の表示範囲の上限に、最大値の10倍にして余裕をもたせる
         self.ax_mrsync.set_ylim(0.1,
                                 self.lines_mrsync[0].max() * 10)
-        self.ax_mrsync.legend(loc='upper right')
+        #self.ax_mrsync.legend(loc='upper right')
+        self.ax_mrsync.legend(bbox_to_anchor=(
+            1, 1), loc='lower right', borderaxespad=0)
 
         ######## Coincidence (P3) ########
         self.ax_p3.cla()
         self.ax_p3.set_title(
-            'TDC from P3: ' + 'Spill No.' + str(spillcount))
+            'TDC from P3: ' + 'Spill No.' + str(spillcount), loc='left')
         self.ax_p3.set_xlabel('time from P3 [s]')
         self.ax_p3.set_ylabel('events/bin')
         self.ax_p3.grid(True)
         self.lines_p3 = self.ax_p3.hist(
-            tdc_p3_w_coinci*CLOCK_TIME*pow(10, -9),
-            bins=250, histtype='step', log=True, label='w/ coincidence', alpha=0.8, color='coral')
-        self.lines_p3 = self.ax_p3.hist(
             tdc_p3_wo_coinci*CLOCK_TIME*pow(10, -9),
             bins=250, histtype='step', log=True, label='wo coincidence', alpha=0.8, color='dodgerblue')
+        self.lines_p3 = self.ax_p3.hist(
+            tdc_p3_w_coinci*CLOCK_TIME*pow(10, -9),
+            bins=250, histtype='step', log=True, label='w/ coincidence', alpha=0.8, color='maroon')
         self.ax_p3.set_ylim(0.1,
                             self.lines_p3[0].max() * 10)
-        self.ax_p3.legend(loc='upper right')
+        #self.ax_p3.legend(loc='upper right')
+        self.ax_p3.legend(bbox_to_anchor=(
+            1, 1), loc='lower right', borderaxespad=0)
 
         ######## Heat Map (MPPC) ########
         self.ax_chmap_mppc.cla()
@@ -599,9 +628,10 @@ class plotter(object):
         self.ax_chmap_mppc.set_yticks([])
         self.ax_chmap_mppc.xaxis.set_ticklabels([])
         self.ax_chmap_mppc.yaxis.set_ticklabels([])
+
         # make log scale colorbar
         norm_chmap = mcolors.SymLogNorm(
-            linthresh=1, vmin=0.8, vmax=hitmap_newhod_2d.max()*10)
+            linthresh=1, vmin=0.02, vmax=max_bin.max()*10)
         cmap_chmap = plt.cm.viridis
         # entry 0 = white
         cmap_chmap.set_under('white')
@@ -638,64 +668,199 @@ class plotter(object):
         ######## Heat Map (PMT) ########
         self.ax_chmap_pmt.cla()
         self.ax_chmap_pmt.set_title("PMTs")
+        # hide ticks and it's label
+        self.ax_chmap_pmt.set_xticks([])
+        self.ax_chmap_pmt.set_yticks([])
         self.ax_chmap_pmt.xaxis.set_ticklabels([])
         self.ax_chmap_pmt.yaxis.set_ticklabels([])
         # データの表示
         self.img_chmap_pmt = self.ax_chmap_pmt.imshow(
-            hitnum_ch_pmt, aspect='auto', cmap='hot_r', interpolation='none')
-        # テキストラベルの表示
-        textlabel = ['BH1', 'BH2', 'TC1', 'TC2', 'OldHod. AllOr', 'PMT',
-                     'PMT', 'PMT', 'PMT', 'PMT', 'PMT', 'PMT', 'Ext.PMT', 'Ext.PMT']
+            hitnum_ch_pmt, aspect='auto', cmap=cmap_chmap, interpolation='none', norm=norm_chmap)
         for i in range(0, 12):
             for j in range(0, 1):
                 self.ax_chmap_pmt.text(
-                    i, j, textlabel[i], ha='center', va='center')
+                    i, j, textlabel[i], ha='center', va='center', rotation='vertical')
         # カラーバーの更新
         self.colorbar_chmap_pmt.update_normal(self.img_chmap_pmt)
+        # OldHodだけ囲う
+        oldhod_area = plt.Rectangle(
+            # (x,y) of lower left corner, width, hight
+            (4-0.5, -0.5), 6, 2,
+            edgecolor="Black", fill=False)
+        self.ax_chmap_pmt.add_patch(oldhod_area)
 
-        ######## Hit Map (Bit-Field) ########
-        self.ax_hitmap.cla()
-        self.ax_hitmap.set_title('CH vs. Entry')
-        self.ax_hitmap.set_xlabel('channel number')
-        self.ax_hitmap.set_ylabel('entries')
+        ######## Hit Map (Bit-Field, PMT) ########
+        self.ax_hitmap_mr_and_pmt.cla()
+        self.ax_hitmap_mr_and_pmt.set_title('CHs vs. Entry (MR Sync & PMT)')
+        self.ax_hitmap_mr_and_pmt.set_xlabel('channel number')
+        self.ax_hitmap_mr_and_pmt.set_ylabel('entries')
 
-        X = range(1+12+64)
-        self.ax_hitmap.step(X, hitmap, where='mid')
-        self.ax_hitmap.set_yscale('log')
-        self.ax_hitmap.set_ylim(0.1, hitmap.max() * 10)
+        X = range(1+12)
+        self.ax_hitmap_mr_and_pmt.step(X, hitmap_mr_and_pmt, where='mid')
+        self.ax_hitmap_mr_and_pmt.set_yscale('log')
 
-        self.ax_hitmap.grid(axis='x', color='0.95')
+        if hitmap_mr_and_pmt.max() > hitmap_mppc.max():
+            hitmap_max_bin = hitmap_mr_and_pmt.max()
+        else:
+            hitmap_max_bin = hitmap_mppc.max()
+        self.ax_hitmap_mr_and_pmt.set_ylim(0.1, hitmap_max_bin.max() * 10)
 
-        # ケーブルごとに色塗り
-        self.ax_hitmap.axvspan(-0.5, 12.5, color="lightcoral")
-        self.ax_hitmap.axvspan(12.5, 20.5, color="palegreen")
-        self.ax_hitmap.axvspan(22.5, 30.5, color="palegreen")
-        self.ax_hitmap.axvspan(20.5, 22.5, color="plum")
-        self.ax_hitmap.axvspan(30.5, 44.5, color="plum")
-        self.ax_hitmap.axvspan(12.5+44.5-12.5, 20.5 +
-                               44.5-12.5, color="lightskyblue")
-        self.ax_hitmap.axvspan(22.5+44.5-12.5, 30.5 +
-                               44.5-12.5, color="lightskyblue")
-        self.ax_hitmap.axvspan(20.5+44.5-12.5, 22.5+44.5-12.5, color="khaki")
-        self.ax_hitmap.axvspan(30.5+44.5-12.5, 44.5+44.5-12.5, color="khaki")
+        self.ax_hitmap_mr_and_pmt.grid(axis='x', color='0.95')
+
+        # 種類ごとに色塗り
+        # mrsync
+        self.ax_hitmap_mr_and_pmt.axvspan(-0.5, 0.5, color="lightcoral")
+        # bh (2)
+        self.ax_hitmap_mr_and_pmt.axvspan(0.5, 2.5, color="palegreen")
+        # tc (2)
+        self.ax_hitmap_mr_and_pmt.axvspan(2.5, 4.5, color="plum")
+        # oldhod (6)
+        self.ax_hitmap_mr_and_pmt.axvspan(4.5, 10.5, color="turquoise")
+        # newpmt (2)
+        self.ax_hitmap_mr_and_pmt.axvspan(10.5, 12.5, color="lightsteelblue")
 
         # 描画範囲x軸を整える
-        self.ax_hitmap.set_xlim(-0.5, 76.5)
+        self.ax_hitmap_mr_and_pmt.set_xlim(-0.5, 12.5)
+        # 横軸整数
+        self.ax_hitmap_mr_and_pmt.get_xaxis().set_major_locator(
+            ticker.MaxNLocator(integer=True))
 
-        ######## TDC Diff from MR Sync ########
-        self.ax_tdcdiff.cla()
-        self.ax_tdcdiff.set_title('TDC Diff. from MR Sync')
-        self.ax_tdcdiff.set_xlabel('channel number')
-        self.ax_tdcdiff.set_ylabel('diff. from mrsync [CLK]')
+        ######## Hit Map (Bit-Field, MPPC) ########
+        self.ax_hitmap_mppc.cla()
+        self.ax_hitmap_mppc.set_title('CHs vs. Entry (MPPC)')
+        self.ax_hitmap_mppc.set_xlabel('channel number')
+        self.ax_hitmap_mppc.set_ylabel('entries')
 
-        # make log scale colorbar
-        norm_bit = mcolors.SymLogNorm(
-            linthresh=1, vmin=0.8, vmax=ChVsDiffFromMrSync.max()*10)
-        cmap_bit = plt.cm.viridis
-        # entry 0 = white
-        cmap_bit.set_under('white')
-        self.ax_tdcdiff.imshow(
-            ChVsDiffFromMrSync, cmap=cmap_bit, aspect='auto', norm=norm_bit, origin='upper', interpolation='none')
+        if kc705_id == 1:
+            # in LPC
+            ch_1to8 = [8, 23, 9, 18, 28, 19, 20, 22]
+            ch_17to24 = [0, 7, 1, 2, 14, 3, 4, 6]
+            # in HPC
+            ch_33to40 = [0]*8
+            ch_49to56 = [0]*8
+            for i in range(len(la_top)):
+                ch_33to40[i] = ch_1to8[i] + 32
+                ch_49to56[i] = ch_17to24[i] + 32
+
+            # in LPC
+            ch_9to16 = [24, 25, 26, 21, 29, 30, 31, 27]
+            ch_25to32 = [10, 11, 12, 5, 15, 16, 17, 13]
+            # in HPC
+            ch_41to48 = [0]*8
+            ch_57to64 = [0]*8
+            for i in range(len(la_down)):
+                ch_41to48[i] = ch_9to16[i] + 32
+                ch_57to64[i] = ch_25to32[i] + 32
+
+            ithbit_for_indexthCH = ch_1to8 + ch_9to16 + ch_17to24 + \
+                ch_25to32 + ch_33to40 + ch_41to48 + ch_57to64
+
+        else:
+            # in HPC
+            ch_65to72 = [0, 7, 1, 2, 14, 3, 4, 6]
+            ch_81to88 = [8, 23, 9, 18, 28, 19, 20, 22]
+            for i in range(8):
+                ch_65to72[i] = ch_65to72[i] + 32
+                ch_81to88[i] = ch_81to88[i] + 32
+            ch_73to80 = [10, 11, 12, 5, 15, 16, 17, 13]
+            ch_89to96 = [24, 25, 26, 21, 29, 30, 31, 27]
+            for i in range(8):
+                ch_73to80[i] = ch_73to80[i] + 32
+                ch_89to96[i] = ch_89to96[i] + 32
+
+            # in LPC
+            ch_97to104 = [0]*8
+            ch_113to120 = [0]*8
+            for i in range(8):
+                ch_97to104[i] = ch_65to72[i] - 32
+                ch_113to120[i] = ch_81to88[i] - 32
+            ch_105to112 = [0]*8
+            ch_121to128 = [0]*8
+            for i in range(8):
+                ch_105to112[i] = ch_73to80[i] - 32
+                ch_121to128[i] = ch_89to96[i] - 32
+
+            ithbit_for_indexthCH = ch_65to72 + ch_73to80 + ch_81to88 + \
+                ch_89to96 + ch_97to104 + ch_105to112 + ch_113to120 + ch_121to128
+
+        hitmap_mppc = hitmap_mppc[ithbit_for_indexthCH]
+
+        # 1始まりにしたいがために、1を足して非表示にする
+        if kc705_id == 1:
+            # mppc id start with 1
+            offset_mppc = 1
+        else:
+            # mppc id start with 65
+            offset_mppc = 65
+        X = range(offset_mppc+64)
+        hitmap_mppc = np.insert(hitmap_mppc, 0, [0]*offset_mppc)
+        self.ax_hitmap_mppc.step(X, hitmap_mppc, where='mid')
+        self.ax_hitmap_mppc.set_yscale('log')
+
+        self.ax_hitmap_mppc.set_ylim(0.1, hitmap_max_bin.max() * 10)
+        self.ax_hitmap_mppc.grid(axis='x', color='0.95')
+
+        # 種類ごとに色塗り
+        # amp1
+        self.ax_hitmap_mppc.axvspan(-0.5 + offset_mppc,
+                                    15.5 + offset_mppc, color="khaki")
+        # amp2
+        self.ax_hitmap_mppc.axvspan(
+            15.5 + offset_mppc, 31.5 + offset_mppc, color="thistle")
+        # amp3
+        self.ax_hitmap_mppc.axvspan(
+            31.5 + offset_mppc, 47.5 + offset_mppc, color="khaki")
+        # amp4
+        self.ax_hitmap_mppc.axvspan(
+            47.5 + offset_mppc, 63.5 + offset_mppc, color="thistle")
+
+        # 描画範囲x軸を整える
+        self.ax_hitmap_mppc.set_xlim(-0.5 + offset_mppc, 63.5 + offset_mppc)
+        # 横軸整数
+        self.ax_hitmap_mppc.get_xaxis().set_major_locator(
+            ticker.MaxNLocator(integer=True))
+
+        ######## TDC Diff from MR Sync (PMT) ########
+        self.ax_tdcdiff_pmt.cla()
+        self.ax_tdcdiff_pmt.set_title('TDC Diff. from MR Sync (PMT)')
+        self.ax_tdcdiff_pmt.set_xlabel('channel number')
+        self.ax_tdcdiff_pmt.set_ylabel('diff. from mrsync [CLK]')
+
+        ChVsDiffFromMrSync_MPPC = ChVsDiffFromMrSync_MPPC[:,
+                                                          ithbit_for_indexthCH]
+
+        self.ax_tdcdiff_pmt.imshow(
+            ChVsDiffFromMrSync_PMT, cmap=cmap_chmap, aspect='auto', norm=norm_chmap, origin='upper', interpolation='kaiser')
+
+        # 横軸整数
+        self.ax_tdcdiff_pmt.get_xaxis().set_major_locator(
+            ticker.MaxNLocator(integer=True))
+
+        ######## TDC Diff from MR Sync (MPPC) ########
+        self.ax_tdcdiff_mppc.cla()
+        self.ax_tdcdiff_mppc.set_title('TDC Diff. from MR Sync (MPPC)')
+        self.ax_tdcdiff_mppc.set_xlabel('channel number')
+        self.ax_tdcdiff_mppc.set_ylabel('diff. from mrsync [CLK]')
+
+        # 1始まりにしたいがために、1を足して非表示にする
+        if kc705_id == 1:
+            # mppc id start with 1
+            offset_mppc = 1
+        else:
+            # mppc id start with 65
+            offset_mppc = 65
+        for i in range(offset_mppc):
+            ChVsDiffFromMrSync_MPPC = np.hstack(
+                ([[0] for i in range(1200)], ChVsDiffFromMrSync_MPPC))
+
+        self.ax_tdcdiff_mppc.imshow(
+            ChVsDiffFromMrSync_MPPC, cmap=cmap_chmap, aspect='auto', norm=norm_chmap, origin='upper', interpolation='kaiser')
+
+        # 描画範囲x軸を整える(0-63->1-64)
+        self.ax_tdcdiff_mppc.set_xlim(offset_mppc, 63 + offset_mppc)
+        # 横軸整数
+        self.ax_tdcdiff_mppc.get_xaxis().set_major_locator(
+            ticker.MaxNLocator(integer=True))
 
     def pauser(self, second, content_type):
 
@@ -864,30 +1029,49 @@ def main(SOMECALCS, PLOTTER, file_path, content_type, kc705_id):
             [np.count_nonzero((sig_mrsync & (1 << bit_i)) != 0)
                 for bit_i in range(1)], dtype='u8')
 
-        hitmap = np.empty(0, dtype='u8')
-        hitmap = np.insert(hitmap, hitmap.size, hit_mppc)
-        hitmap = np.insert(hitmap, hitmap.size, hit_pmt)
-        hitmap = np.insert(hitmap, hitmap.size, hit_mrsync)
+        hitmap_mr_and_pmt = np.empty(0, dtype='u8')
+        hitmap_mr_and_pmt = np.insert(
+            hitmap_mr_and_pmt, hitmap_mr_and_pmt.size, hit_mrsync)
+        hitmap_mr_and_pmt = np.insert(
+            hitmap_mr_and_pmt, hitmap_mr_and_pmt.size, hit_pmt)
+        # print('len(hitmap_mr_and_pmt):', len(hitmap_mr_and_pmt))
 
-        ######## TDC Diff from MR Sync ########
+        hitmap_mppc = np.empty(0, dtype='u8')
+        hitmap_mppc = np.insert(hitmap_mppc, hitmap_mppc.size, hit_mppc)
+
+        ######## TDC Diff from MR Sync (PMT) ########
         # 6us(/5ns=1200)だから、MRSyncから1200CLKを見れば十分、オーバーフローもアンダーフローもないはず
         clk_range = 1200
-        diff_from_mrsync_map = np.zeros((clk_range, 64+12), dtype='u8')
-        diff_from_mrsync_map = np.ascontiguousarray(diff_from_mrsync_map)
+        diff_from_mrsync_map_pmt = np.zeros((clk_range, 12), dtype='u8')
+        diff_from_mrsync_map_pmt = np.ascontiguousarray(
+            diff_from_mrsync_map_pmt)
         # 0,..., 1198, 1199に収まらないとき
-        underflow = np.zeros(64+12, dtype='u8')
-        underflow = np.ascontiguousarray(underflow)
-        overflow = np.zeros(64+12, dtype='u8')
-        underflow = np.ascontiguousarray(underflow)
+        underflow_pmt = np.zeros(12, dtype='u8')
+        underflow_pmt = np.ascontiguousarray(underflow_pmt)
+        overflow_pmt = np.zeros(12, dtype='u8')
+        overflow_pmt = np.ascontiguousarray(overflow_pmt)
 
         if mrsync_pmt.size != 0:
-            diff_from_mrsync_map, underflow, overflow = get_diff_from_mrsync_map_pmt(
-                0, 12, sig_pmt, tdc_pmt, mrsync_pmt, diff_from_mrsync_map, underflow, overflow)
+            diff_from_mrsync_map_pmt, underflow_pmt, overflow_pmt = get_diff_from_mrsync_map_pmt(
+                0, 12, sig_pmt, tdc_pmt, mrsync_pmt, diff_from_mrsync_map_pmt, underflow_pmt, overflow_pmt)
+
+        ######## TDC Diff from MR Sync (MPPC) ########
+        # 6us(/5ns=1200)だから、MRSyncから1200CLKを見れば十分、オーバーフローもアンダーフローもないはず
+        clk_range = 1200
+        diff_from_mrsync_map_mppc = np.zeros((clk_range, 64+12), dtype='u8')
+        diff_from_mrsync_map_mppc = np.ascontiguousarray(
+            diff_from_mrsync_map_mppc)
+        # 0,..., 1198, 1199に収まらないとき
+        underflow_mppc = np.zeros(64, dtype='u8')
+        underflow_mppc = np.ascontiguousarray(underflow_mppc)
+        overflow_mppc = np.zeros(64, dtype='u8')
+        overflow_mppc = np.ascontiguousarray(overflow_mppc)
+
         if mrsync_mppc.size != 0:
-            diff_from_mrsync_map, underflow, overflow = get_diff_from_mrsync_map_mppc(
-                12, 64, sig_mppc, tdc_mppc, mrsync_mppc, diff_from_mrsync_map, underflow, overflow)
-        # print('np.count_nonzero(diff_from_mrsync_map):', np.count_nonzero(diff_from_mrsync_map))
-        # print('diff_from_mrsync_map[0]: ', diff_from_mrsync_map[0])
+            diff_from_mrsync_map_mppc, underflow_mppc, overflow_mppc = get_diff_from_mrsync_map_mppc(
+                0, 64, sig_mppc, tdc_mppc, mrsync_mppc, diff_from_mrsync_map_mppc, underflow_mppc, overflow_mppc)
+        # print('np.count_nonzero(diff_from_mrsync_map_mppc):', np.count_nonzero(diff_from_mrsync_map_mppc))
+        # print('diff_from_mrsync_map_mppc[0]: ', diff_from_mrsync_map_mppc[0])
 
         T_END = time.time()
         print('TIME [s] to caliculation: ' + str(T_END - T_START))
@@ -895,8 +1079,9 @@ def main(SOMECALCS, PLOTTER, file_path, content_type, kc705_id):
         PLOTTER.reloader(newhod_coincidenced_mrsync, newhod-mrsync_newhod,
                          newhod_coincidenced_p3, newhod,
                          heatmap_mppc_2d, heatmap_pmt_1d,
-                         hitmap, diff_from_mrsync_map,
-                         spill_i)
+                         hitmap_mr_and_pmt, hitmap_mppc,
+                         diff_from_mrsync_map_pmt, diff_from_mrsync_map_mppc,
+                         spill_i, kc705_id)
         PLOTTER.pauser(0.1, content_type)
 
     return
