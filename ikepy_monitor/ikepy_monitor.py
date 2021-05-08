@@ -52,6 +52,8 @@ def get_option():
         '-f', '--file', type=str, default=None, help='path to file')
     argparser.add_argument(
         '-k', '--kc', type=int, default=1, help='select KC705-(1 or 2)')
+    argparser.add_argument(
+        '-p', '--pc', type=int, default=1, help='select caolila(1) or cometdaq03(2)')
 
     return argparser
 
@@ -600,11 +602,14 @@ class plotter(object):
         self.ax_chmap_mppc.xaxis.set_ticklabels([])
         self.ax_chmap_mppc.yaxis.set_ticklabels([])
         # make log scale colorbar
-        norm = mcolors.SymLogNorm(
-            linthresh=1, vmin=0, vmax=hitmap_newhod_2d.max()*10)
+        norm_chmap = mcolors.SymLogNorm(
+            linthresh=1, vmin=1, vmax=hitmap_newhod_2d.max()*10)
+        cmap_chmap = plt.cm.viridis
+        # entry 0 = white
+        cmap_chmap.set_under('white')
         # データの表示
         self.img_chmap_mppc = self.ax_chmap_mppc.imshow(
-            hitmap_newhod_2d, cmap="viridis", aspect='auto', norm=norm)
+            hitmap_newhod_2d, cmap=cmap_chmap, aspect='auto', norm=norm_chmap, interpolation='none')
 
         # overlay rectangular area on plot
         for x in range(5, 61):
@@ -639,7 +644,7 @@ class plotter(object):
         self.ax_chmap_pmt.yaxis.set_ticklabels([])
         # データの表示
         self.img_chmap_pmt = self.ax_chmap_pmt.imshow(
-            hitnum_ch_pmt, aspect='auto', cmap='hot_r')
+            hitnum_ch_pmt, aspect='auto', cmap='hot_r', interpolation='none')
         # テキストラベルの表示
         textlabel = ['BH1', 'BH2', 'TC1', 'TC2', 'OldHod. AllOr', 'PMT',
                      'PMT', 'PMT', 'PMT', 'PMT', 'PMT', 'PMT', 'Ext.PMT', 'Ext.PMT']
@@ -686,10 +691,13 @@ class plotter(object):
         self.ax_tdcdiff.set_ylabel('diff. from mrsync [CLK]')
 
         # make log scale colorbar
-        norm = mcolors.SymLogNorm(
-            linthresh=1, vmin=0, vmax=ChVsDiffFromMrSync.max()*10)
+        norm_bit = mcolors.SymLogNorm(
+            linthresh=1, vmin=1, vmax=ChVsDiffFromMrSync.max()*10)
+        cmap_bit = plt.cm.viridis
+        # entry 0 = white
+        cmap_bit.set_under('white')
         self.ax_tdcdiff.imshow(
-            ChVsDiffFromMrSync, cmap="viridis", aspect='auto', norm=norm)
+            ChVsDiffFromMrSync, cmap=cmap_bit, aspect='auto', norm=norm_bit, origin='upper', interpolation='none')
 
     def pauser(self, second, content_type):
 
@@ -699,7 +707,7 @@ class plotter(object):
         else:
             plt.pause(second)
 
-    def finder(self, path_to_directory):
+    def finder(self, path_to_directory, daq_pc):
         # 最新から二番目に作成されたファイルを拾ってくる
         list_of_files = glob.glob(path_to_directory+'*')
         # print('list_of_files:', list_of_files)
@@ -708,11 +716,14 @@ class plotter(object):
         # print('latest_two_file:', latest_two_file)
 
         if(len(latest_two_file[1:2]) > 0):
-            # in cometdaq03: latest_two_file: [old, new]
+            # in cometdaq03(2): latest_two_file: [old, new]
             # so, path_to_file = latest_two_file[0]
-            # in caolila: latest_two_file: [new, old]
+            # in caolila(1): latest_two_file: [new, old]
             # so, path_to_file = latest_two_file[1]
-            path_to_file = latest_two_file[0]
+            if daq_pc == 1:
+                path_to_file = latest_two_file[1]
+            else:
+                path_to_file = latest_two_file[0]
             self.file_name = path_to_file
             return path_to_file
         else:
@@ -930,13 +941,13 @@ if __name__ == '__main__':
         print("path_to_file:", path_to_file)
         main(SOMECALCS, PLOTTER, path_to_file, content_type, args.kc)
     while (True):
-        while(len(PLOTTER.finder(path_to_directory)) == 0):
+        while(len(PLOTTER.finder(path_to_directory, args.pc)) == 0):
             print('NO FILE ;-)')
             time.sleep(0.3)
 
-        path_to_file = PLOTTER.finder(path_to_directory)
+        path_to_file = PLOTTER.finder(path_to_directory, args.pc)
         buf.value = bytes(path_to_file, encoding='utf-8')
         PLOTTER.file_name = path_to_file
 
         print("path_to_file:", path_to_file)
-        main(SOMECALCS, PLOTTER, path_to_file, args.kc)
+        main(SOMECALCS, PLOTTER, path_to_file, content_type, args.kc)
