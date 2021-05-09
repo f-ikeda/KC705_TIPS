@@ -594,13 +594,13 @@ class plotter(object):
         self.ax_mrsync.cla()
         self.ax_mrsync.set_title(
             'TDC from MR Sync: ' + 'Spill No.' + str(spillcount), loc='left')
-        self.ax_mrsync.set_xlabel('time from MR Sync [us]')
+        self.ax_mrsync.set_xlabel('time from MR Sync [us]', loc='left')
         self.ax_mrsync.set_ylabel('events/bin')
         self.ax_mrsync.grid(True)
         self.lines_mrsync = self.ax_mrsync.hist(
             tdc_mrsync_wo_coinci*CLOCK_TIME*pow(10, -3),
             bins=250, histtype='step', log=True, label='wo coincidence', alpha=0.8, color='dodgerblue')
-        self.lines_mrsync = self.ax_mrsync.hist(
+        self.ax_mrsync.hist(
             tdc_mrsync_w_coinci*CLOCK_TIME*pow(10, -3),
             bins=250, histtype='step', log=True, label='w/ coincidence', alpha=0.8, color='maroon')
         # y軸の表示範囲の上限に、最大値の10倍にして余裕をもたせる
@@ -614,13 +614,13 @@ class plotter(object):
         self.ax_p3.cla()
         self.ax_p3.set_title(
             'TDC from P3: ' + 'Spill No.' + str(spillcount), loc='left')
-        self.ax_p3.set_xlabel('time from P3 [s]')
+        self.ax_p3.set_xlabel('time from P3 [s]', loc='left')
         self.ax_p3.set_ylabel('events/bin')
         self.ax_p3.grid(True)
         self.lines_p3 = self.ax_p3.hist(
             tdc_p3_wo_coinci*CLOCK_TIME*pow(10, -9),
             bins=250, histtype='step', log=True, label='wo coincidence', alpha=0.8, color='dodgerblue')
-        self.lines_p3 = self.ax_p3.hist(
+        self.ax_p3.hist(
             tdc_p3_w_coinci*CLOCK_TIME*pow(10, -9),
             bins=250, histtype='step', log=True, label='w/ coincidence', alpha=0.8, color='maroon')
         self.ax_p3.set_ylim(0.1,
