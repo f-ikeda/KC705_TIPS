@@ -59,6 +59,15 @@ def get_option():
     return argparser
 
 
+@jit('i8[:](i8[:])', nopython=True)
+def delete_invalid_mrsync(mrsync_foo):
+    # mrsyncが-1の要素を削除
+    while mrsync_foo[0] == -1:
+        mrsync_foo = np.delete(mrsync_foo, 0)
+
+    return mrsync_foo
+
+
 @jit('i8[:](i8[:],i8[:])', nopython=True)
 def coincidence_p3(tdc_foo, tdc_bar):
     # obtain an coincidenced array of tdc values with respect to the p3 signal
@@ -969,6 +978,19 @@ def main(SOMECALCS, PLOTTER, file_path, content_type, kc705_id):
                                       sig_pmt, tdc_pmt, mrsync_pmt,
                                       sig_mrsync, mrsync,
                                       bookmarks)
+
+        # mrsyncが-1に対応する要素を削除
+        mrsync_mppc = delete_invalid_mrsync(mrsync_mppc)
+        if sig_mppc.size != mrsync_mppc.size:
+            sig_mppc = sig_mppc[sig_mppc.size - mrsync_mppc.size:]
+            tdc_mppc = tdc_mppc[tdc_mppc.size - mrsync_mppc.size:]
+        mrsync_pmt = delete_invalid_mrsync(mrsync_pmt)
+        if sig_pmt.size != mrsync_pmt.size:
+            sig_pmt = sig_pmt[sig_pmt.size - mrsync_pmt.size:]
+            tdc_pmt = tdc_pmt[tdc_pmt.size - mrsync_pmt.size:]
+        mrsync = delete_invalid_mrsync(mrsync)
+        if sig_mrsync.size != mrsync.size:
+            sig_mrsync = sig_mrsync[sig_mrsync.size - mrsync.size:]
 
         # extract data of each detector
         newhod, mrsync_newhod, \
