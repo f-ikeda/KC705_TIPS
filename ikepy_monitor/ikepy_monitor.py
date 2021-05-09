@@ -404,13 +404,13 @@ class SomeCalcs(object):
             # format to pass to imshow
             hitmap_newhod_2d = np.array(
                 [hitnum_ch_mppc[:32], hitnum_ch_mppc[32:]])
-            print('hitmap_newhod_2d(2,32):', hitmap_newhod_2d.shape)
+            # print('hitmap_newhod_2d(2,32):', hitmap_newhod_2d.shape)
             # add KC705-2's mppc (top and bottom of half left side)
             hitmap_newhod_2d = np.insert(
                 hitmap_newhod_2d, 0, np.zeros(32, dtype='i8'), axis=0)
             hitmap_newhod_2d = np.insert(
                 hitmap_newhod_2d, 3, np.zeros(32, dtype='i8'), axis=0)
-            print('hitmap_newhod_2d(left):', hitmap_newhod_2d.shape)
+            # print('hitmap_newhod_2d(left):', hitmap_newhod_2d.shape)
             # add extra pmt
             top_expmt = np.full((2, 5), np.count_nonzero(
                 (sig_pmt & 0b010000000000) != 0), dtype='i8')
@@ -419,12 +419,12 @@ class SomeCalcs(object):
             hitmap_expmt_2d = np.insert(top_expmt, 2, bottom_expmt, axis=0)
             hitmap_newhod_2d = np.insert(
                 hitmap_newhod_2d, [0], hitmap_expmt_2d, axis=1)
-            print('hitmap_newhod_2d(pmt):', hitmap_newhod_2d.shape)
+            # print('hitmap_newhod_2d(pmt):', hitmap_newhod_2d.shape)
 
             # add half right side (brank)
             hitmap_newhod_2d = np.insert(
                 hitmap_newhod_2d, [5+32], np.zeros((4, 24+5), dtype='i8'), axis=1)
-            print('hitmap_newhod_2d(finally):', hitmap_newhod_2d.shape)
+            # print('hitmap_newhod_2d(finally):', hitmap_newhod_2d.shape)
 
         if (kc705_id == 2):
 
@@ -747,7 +747,7 @@ class plotter(object):
             # in HPC
             ch_33to40 = [0]*8
             ch_49to56 = [0]*8
-            for i in range(len(la_top)):
+            for i in range(8):
                 ch_33to40[i] = ch_1to8[i] + 32
                 ch_49to56[i] = ch_17to24[i] + 32
 
@@ -757,12 +757,12 @@ class plotter(object):
             # in HPC
             ch_41to48 = [0]*8
             ch_57to64 = [0]*8
-            for i in range(len(la_down)):
+            for i in range(8):
                 ch_41to48[i] = ch_9to16[i] + 32
                 ch_57to64[i] = ch_25to32[i] + 32
 
             ithbit_for_indexthCH = ch_1to8 + ch_9to16 + ch_17to24 + \
-                ch_25to32 + ch_33to40 + ch_41to48 + ch_57to64
+                ch_25to32 + ch_33to40 + ch_41to48 + ch_49to56 + ch_57to64
 
         else:
             # in HPC
