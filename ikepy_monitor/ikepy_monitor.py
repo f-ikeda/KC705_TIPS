@@ -55,6 +55,8 @@ def get_option():
         '-f', '--file', type=str, default=None, help='path to file')
     argparser.add_argument(
         '-k', '--kc', type=int, default=1, help='select KC705-(1 or 2)')
+    argparser.add_argument(
+        '-s', '--save', action='store_true', help='save')
 
     return argparser
 
@@ -871,7 +873,13 @@ class plotter(object):
         self.ax_tdcdiff_mppc.get_xaxis().set_major_locator(
             ticker.MaxNLocator(integer=True))
 
-    def pauser(self, second, content_type):
+    def pauser(self, second, content_type, save_flag):
+
+        if save_flag:
+            os.makedirs("ikepy_fig", exist_ok=True)
+            png_name = os.path.basename(self.file_name)
+            self.fig.savefig(
+                "ikepy_fig/" + png_name.replace('.dat', '') + ".png")
 
         if content_type == 'file':
             plt.show()
@@ -897,7 +905,7 @@ class plotter(object):
 
 
 # @profile
-def main(SOMECALCS, PLOTTER, file_path, content_type, kc705_id):
+def main(SOMECALCS, PLOTTER, file_path, content_type, kc705_id, save_flag):
 
     # -------- get a list of spills in a file --------
     T_START = time.time()
@@ -1104,7 +1112,7 @@ def main(SOMECALCS, PLOTTER, file_path, content_type, kc705_id):
                          hitmap_mr_and_pmt, hitmap_mppc,
                          diff_from_mrsync_map_pmt, diff_from_mrsync_map_mppc,
                          spill_i, kc705_id)
-        PLOTTER.pauser(0.1, content_type)
+        PLOTTER.pauser(0.1, content_type, save_flag)
 
     return
 
@@ -1138,7 +1146,8 @@ if __name__ == '__main__':
         buf.value = bytes(path_to_file, encoding='utf-8')
         PLOTTER.file_name = path_to_file
         print("path_to_file:", path_to_file)
-        main(SOMECALCS, PLOTTER, path_to_file, content_type, args.kc)
+        main(SOMECALCS, PLOTTER, path_to_file,
+             content_type, args.kc, args.save)
     while (True):
         while(len(PLOTTER.finder(path_to_directory)) == 0):
             print('NO FILE ;-)')
@@ -1149,4 +1158,5 @@ if __name__ == '__main__':
         PLOTTER.file_name = path_to_file
 
         print("path_to_file:", path_to_file)
-        main(SOMECALCS, PLOTTER, path_to_file, content_type, args.kc)
+        main(SOMECALCS, PLOTTER, path_to_file,
+             content_type, args.kc, args.save)
