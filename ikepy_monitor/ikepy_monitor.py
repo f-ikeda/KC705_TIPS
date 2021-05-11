@@ -892,7 +892,8 @@ class plotter(object):
         # [older, old, new, newer]
         list_of_files = glob.glob(path_to_directory+'*')
         # print('list_of_files:', list_of_files)
-        # [new, newer]
+	list_of_files.sort()
+	# [new, newer]
         latest_two_file = list_of_files[-2:]
         # print('latest_two_file:', latest_two_file)
 
