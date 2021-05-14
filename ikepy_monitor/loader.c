@@ -82,7 +82,7 @@ void packer(unsigned char *array_13bytes, unsigned long long *tmp_sig_mppc, unsi
 void a_spill_loader(unsigned long long *sig_mppc, signed long long *tdc_mppc, signed long long *mrsync_mppc,
                     unsigned short *sig_pmt, signed long long *tdc_pmt, signed long long *mrsync_pmt,
                     unsigned char *sig_mrsync, signed long long *mrsync, unsigned int *indexes,
-                    char *file_path, long *offset_to_read, long *data_num)
+                    char *file_path, long *offset_to_read, long *data_num, long *skip_time)
 // (sig_mppc, tdc_mppc, mrsync_mppc, sig_pmt, tdc_pmt, mrsync_pmt,  sig_mrsync, mrsync, indexes, file_path, offset_to_read, data_num)
 {
     /*
@@ -158,6 +158,16 @@ void a_spill_loader(unsigned long long *sig_mppc, signed long long *tdc_mppc, si
         if (header_or_not(array_13bytes))
         {
             header_flag = true;
+            // タイムスタンプを飛ばす
+            if (skip_time[0] == 999)
+            {
+                int seekret = fseek(pointer_file, 8, SEEK_CUR);
+                if (seekret)
+                {
+                    printf("fseek error: (ret = %d)\n", seekret);
+                    return;
+                }
+            }
         }
         // フッターの場合
         else if (footer_or_not(array_13bytes))
@@ -232,7 +242,7 @@ void get_spillcount_header(unsigned char *array_13bytes, unsigned long long *tmp
 }
 
 void find_spills(unsigned long long *spillcount, unsigned long long *offset, unsigned long long *tdcnum, unsigned int *indexes,
-                 char *file_path, long *data_num)
+                 char *file_path, long *data_num, long *skip_time)
 {
     FILE *pointer_file;
     pointer_file = fopen(file_path, "rb");
@@ -260,6 +270,17 @@ void find_spills(unsigned long long *spillcount, unsigned long long *offset, uns
         // ヘッダーの場合
         if (header_or_not(array_13bytes))
         {
+            // タイムスタンプを飛ばす
+            if (skip_time[0] == 999)
+            {
+                int seekret = fseek(pointer_file, 8, SEEK_CUR);
+                if (seekret)
+                {
+                    printf("fseek error: (ret = %d)\n", seekret);
+                    return;
+                }
+            }
+
             tmp_offset = readed_count;
             get_spillcount_header(array_13bytes, &spillcount_header);
             // printf("spillcount_header: %llu\n", spillcount_header);
