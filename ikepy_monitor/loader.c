@@ -114,6 +114,16 @@ void a_spill_loader(unsigned long long *sig_mppc, signed long long *tdc_mppc, si
         printf("fseek error: (ret = %d)\n", seekret);
         return;
     }
+    // タイムスタンプを飛ばす
+    if (skip_time[0] == 999)
+    {
+        int seekret = fseek(pointer_file, 8, SEEK_CUR);
+        if (seekret)
+        {
+            printf("fseek error: (ret = %d)\n", seekret);
+            return;
+        }
+    }
 
     // bytes
     int data_unit = 13;
