@@ -57,6 +57,8 @@ def get_option():
         '-k', '--kc', type=int, default=1, help='select KC705-(1 or 2)')
     argparser.add_argument(
         '-s', '--save', action='store_true', help='save')
+    argparser.add_argument(
+        '-t', '--timestamp', action='store_true', help='skip 8 bytes timestamp after header')
 
     return argparser
 
@@ -608,7 +610,7 @@ class plotter(object):
         # y軸の表示範囲の上限に、最大値の10倍にして余裕をもたせる
         self.ax_mrsync.set_ylim(0.1,
                                 self.lines_mrsync[0].max() * 10)
-        #self.ax_mrsync.legend(loc='upper right')
+        # self.ax_mrsync.legend(loc='upper right')
         self.ax_mrsync.legend(bbox_to_anchor=(
             1, 1), loc='lower right', borderaxespad=0)
 
@@ -627,7 +629,7 @@ class plotter(object):
             bins=250, histtype='step', log=True, label='w/ coincidence', alpha=0.8, color='maroon')
         self.ax_p3.set_ylim(0.1,
                             self.lines_p3[0].max() * 10)
-        #self.ax_p3.legend(loc='upper right')
+        # self.ax_p3.legend(loc='upper right')
         self.ax_p3.legend(bbox_to_anchor=(
             1, 1), loc='lower right', borderaxespad=0)
 
@@ -906,7 +908,7 @@ class plotter(object):
 
 
 # @profile
-def main(SOMECALCS, PLOTTER, file_path, content_type, kc705_id, save_flag):
+def main(SOMECALCS, PLOTTER, file_path, content_type, kc705_id, save_flag, skip_time_flag):
 
     # -------- get a list of spills in a file --------
     T_START = time.time()
@@ -927,8 +929,14 @@ def main(SOMECALCS, PLOTTER, file_path, content_type, kc705_id, save_flag):
     data_nums = np.zeros(2, dtype='i4')
     data_nums[0] = int(os.path.getsize(file_path) / 13)
 
+    # timestampを飛ばす
+    skip_time = np.zeros(2, dtype='i4')
+    skip_time = np.ascontiguousarray(skip_time)
+    if skip_time_flag:
+        skip_time[0] = 999
+
     c_library.find_spills(np.ctypeslib.as_ctypes(spillcounts), np.ctypeslib.as_ctypes(offsets), np.ctypeslib.as_ctypes(tdcnum),
-                          np.ctypeslib.as_ctypes(bookmarks), buf, np.ctypeslib.as_ctypes(data_nums))
+                          np.ctypeslib.as_ctypes(bookmarks), buf, np.ctypeslib.as_ctypes(data_nums), np.ctypeslib.as_ctypes(skip_time))
 
     spillcounts = spillcounts[:bookmarks[0]+1]
     offsets = offsets[:bookmarks[0]+1]
@@ -977,7 +985,7 @@ def main(SOMECALCS, PLOTTER, file_path, content_type, kc705_id, save_flag):
                                      tdc_pmt), np.ctypeslib.as_ctypes(mrsync_pmt),
                                  np.ctypeslib.as_ctypes(
                                      sig_mrsync), np.ctypeslib.as_ctypes(mrsync),
-                                 np.ctypeslib.as_ctypes(bookmarks), buf, np.ctypeslib.as_ctypes(offset), np.ctypeslib.as_ctypes(data_num))
+                                 np.ctypeslib.as_ctypes(bookmarks), buf, np.ctypeslib.as_ctypes(offset), np.ctypeslib.as_ctypes(data_num), np.ctypeslib.as_ctypes(skip_time))
 
         # trim off the excess elements
         sig_mppc, tdc_mppc, mrsync_mppc, \
@@ -1148,7 +1156,7 @@ if __name__ == '__main__':
         PLOTTER.file_name = path_to_file
         print("path_to_file:", path_to_file)
         main(SOMECALCS, PLOTTER, path_to_file,
-             content_type, args.kc, args.save)
+             content_type, args.kc, args.save, args.timestamp)
     while (True):
         while(len(PLOTTER.finder(path_to_directory)) == 0):
             print('NO FILE ;-)')
@@ -1160,4 +1168,4 @@ if __name__ == '__main__':
 
         print("path_to_file:", path_to_file)
         main(SOMECALCS, PLOTTER, path_to_file,
-             content_type, args.kc, args.save)
+             content_type, args.kc, args.save, args.timestamp)
