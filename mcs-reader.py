@@ -60,6 +60,8 @@ def get_option():
     argparser.add_argument(
         '-if', '--skip', action='store_true', help='draw graph with skip initial and final spills with -gt')
     argparser.add_argument(
+        '-mt', '--mtplot', action='store_true', help='draw mt. plot (1 file/spillが前提、要注意)')
+    argparser.add_argument(
         '-t', '--time', action='store_true', help='skip 8bytes timestamp after header')
 
     return argparser.parse_args()
@@ -85,6 +87,43 @@ class bit:
     FOOTER_MAGICWORD = 0xFFFF
     SIZE_FOOTER_EVENTMATCH = 16
     SIZE_FOOTER_RECORDEDMRSYNC = 32
+
+
+def prlot_mt(data_with_a_spill):
+
+    fig = plt.figure(figsize=(8, 6))
+    plt.subplots_adjust(wspace=0.4, hspace=0.6)
+
+    ax1 = fig.add_subplot(1, 1, 1)
+
+    output_times = data_with_a_spill.shape[0]  # axis=0は出力の回数でラベルされている
+    bin_size = data_with_a_spill.shape[1]  # binの数、1088になるはず
+    mt_array = data_with_a_output = np.zeros(
+        (output_times, bin_size), dtype=np.uint16)
+    for i in range(output_times):
+        mt_array[i] = data_with_a_spill[i].sum(axis=2)
+
+    # make log scale colorbar
+    norm_mtplot = mcolors.SymLogNorm(
+        linthresh=1, vmin=0.8, vmax=mt_array.max()*10)
+    # エントリなければ色塗らない
+    cmap_mtplot = plt.cm.viridis
+    cmap_mtplot.set_under('white')
+
+    # entiries = data_with_a_spill.sum(axis=0).T.sum()
+    extries = 0
+
+    # 転置して時間を横軸に
+    img_imshow = ax1.imshow(mt_array,
+                            cmap=cmap_mtplot, aspect='auto', origin='lower', norm=norm_mtplot, interpolation='none')
+    fig.colorbar(img_imshow, label='Entiries:' +
+                 str(entries), orientation='vertical')
+    ax1.set_title('mt plot')
+    ax1.set_xlabel('CLK')
+    ax1.set_ylabel('output times')
+
+    plt.show()
+    sys.exit()
 
 
 def plot_spill(data_with_a_spill):
@@ -335,6 +374,8 @@ def main(path_to_file):
                     if (args.graphspill == spill_count_old):
                         plot_spill(data_with_a_spill)
 
+                    if args.mtplot:
+                        prlot_mt(data_with_a_spill)
             else:
                 # データの場合
                 f.seek(-1 * bit.SIZE_HEADER, 1)
