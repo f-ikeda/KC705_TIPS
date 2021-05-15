@@ -272,6 +272,7 @@ def main(path_to_file):
                 # ヘッダーが来たら
                 if args.time:
                     timestamp_8bytes = f.read(8)
+                    readed_size += bit.SIZE_HEADER
 
                 if (spill_count_old != -1):  # 最初の一回は飛ばすため
                     # アウトプットごとの(以前のアウトプットの, 以前のヘッダーに属する)のデータを詰める
