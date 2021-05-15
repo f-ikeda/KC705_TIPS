@@ -59,6 +59,8 @@ def get_option():
         '-df', '--outputdiff', action='store_true', help='with -ot, draw hist of diff recorded mrsyncs and total hits for each output of certain spillcount')
     argparser.add_argument(
         '-if', '--skip', action='store_true', help='draw graph with skip initial and final spills with -gt')
+    argparser.add_argument(
+        '-t', '--time', action='store_true', help='skip 8bytes timestamp after header')
 
     return argparser.parse_args()
 
@@ -268,6 +270,8 @@ def main(path_to_file):
 
             if ((int_1word >> (4 * 8)) == bit.HEADER_MAGICWORD):
                 # ヘッダーが来たら
+                if args.time:
+                    timestamp_8bytes = f.read(8)
 
                 if (spill_count_old != -1):  # 最初の一回は飛ばすため
                     # アウトプットごとの(以前のアウトプットの, 以前のヘッダーに属する)のデータを詰める
