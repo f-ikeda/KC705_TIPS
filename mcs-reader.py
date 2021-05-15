@@ -100,8 +100,10 @@ def prlot_mt(data_with_a_spill):
     bin_size = data_with_a_spill.shape[1]  # binの数、1088になるはず
     mt_array = data_with_a_output = np.zeros(
         (output_times, bin_size), dtype=np.uint16)
+    print("mt_array.shape:", mt_array.shape)
+    print("data_with_a_spill.shape:", data_with_a_spill.shape)
     for i in range(output_times):
-        mt_array[i] = data_with_a_spill[i].sum(axis=2)
+        mt_array[i] = data_with_a_spill.sum(axis=2)[i]
 
     # make log scale colorbar
     norm_mtplot = mcolors.SymLogNorm(
@@ -110,8 +112,8 @@ def prlot_mt(data_with_a_spill):
     cmap_mtplot = plt.cm.viridis
     cmap_mtplot.set_under('white')
 
-    # entiries = data_with_a_spill.sum(axis=0).T.sum()
-    extries = 0
+    # entries = data_with_a_spill.sum(axis=0).T.sum()
+    entries = 0
 
     # 転置して時間を横軸に
     img_imshow = ax1.imshow(mt_array,
