@@ -21,6 +21,9 @@ import matplotlib.colors as mcolors
 # make thicks as integer
 import matplotlib.ticker as ticker
 
+# use copy of cmap
+import copy
+
 
 # debug
 import time
@@ -585,15 +588,6 @@ class plotter(object):
             textlabel = ['BH1', 'BH2', 'TC1', 'TC2', 'OldPMT15|14|13',  'OldPMT12',
                          'OldPMT11', 'OldPMT10', 'OldPMT09', 'OldPMT08', 'Ext.PMT130', 'Ext.PMT132']
 
-        if hitmap_newhod_2d.max() > hitnum_ch_pmt.max():
-            max_bin = hitmap_newhod_2d.max()
-        elif hitmap_newhod_2d.max() <= hitnum_ch_pmt.max():
-            max_bin = hitnum_ch_pmt.max()
-        elif ChVsDiffFromMrSync_PMT.max() > ChVsDiffFromMrSync_MPPC.max():
-            max_bin = ChVsDiffFromMrSync_PMT.max()
-        elif ChVsDiffFromMrSync_PMT.max() <= ChVsDiffFromMrSync_MPPC.max():
-            max_bin = ChVsDiffFromMrSync_MPPC.max()
-
         ######## Coincidence (MR Sync) ########
         self.ax_mrsync.cla()
         self.ax_mrsync.set_title(
@@ -643,14 +637,23 @@ class plotter(object):
         self.ax_chmap_mppc.yaxis.set_ticklabels([])
 
         # make log scale colorbar
+        norm_mppcheatmap = mcolors.SymLogNorm(
+            linthresh=1, vmin=0.02, vmax=hitmap_newhod_2d.max(), base=10)
+        # cmap_mppcheatmap = plt.cm.viridis
+        cmap_mppcheatmap = copy.copy(plt.cm.get_cmap("viridis"))
+        # entry 0 = white
+        cmap_mppcheatmap.set_under('white')
+        '''
+        # make log scale colorbar
         norm_chmap = mcolors.SymLogNorm(
             linthresh=1, vmin=0.02, vmax=max_bin.max()*10)
         cmap_chmap = plt.cm.viridis
         # entry 0 = white
         cmap_chmap.set_under('white')
+        '''
         # データの表示
         self.img_chmap_mppc = self.ax_chmap_mppc.imshow(
-            hitmap_newhod_2d, cmap=cmap_chmap, aspect='auto', norm=norm_chmap, interpolation='none')
+            hitmap_newhod_2d, cmap=cmap_mppcheatmap, aspect='auto', norm=norm_mppcheatmap, interpolation='none')
 
         # overlay rectangular area on plot
         for x in range(5, 61):
@@ -686,9 +689,16 @@ class plotter(object):
         self.ax_chmap_pmt.set_yticks([])
         self.ax_chmap_pmt.xaxis.set_ticklabels([])
         self.ax_chmap_pmt.yaxis.set_ticklabels([])
+        # make log scale colorbar
+        norm_pmtheatmap = mcolors.SymLogNorm(
+            linthresh=1, vmin=0.02, vmax=hitnum_ch_pmt.max(), base=10)
+        # cmap_pmtheatmap = plt.cm.viridis
+        cmap_pmtheatmap = copy.copy(plt.cm.get_cmap("viridis"))
+        # entry 0 = white
+        cmap_pmtheatmap.set_under('white')
         # データの表示
         self.img_chmap_pmt = self.ax_chmap_pmt.imshow(
-            hitnum_ch_pmt, aspect='auto', cmap=cmap_chmap, interpolation='none', norm=norm_chmap)
+            hitnum_ch_pmt, aspect='auto', cmap=cmap_pmtheatmap, interpolation='none', norm=norm_pmtheatmap)
         for i in range(0, 12):
             for j in range(0, 1):
                 self.ax_chmap_pmt.text(
@@ -767,6 +777,7 @@ class plotter(object):
 
             ithbit_for_indexthCH = ch_1to8 + ch_9to16 + ch_17to24 + \
                 ch_25to32 + ch_33to40 + ch_41to48 + ch_49to56 + ch_57to64
+            # print("kc705_id == 1, ithbit_for_indexthCH:", ithbit_for_indexthCH)
 
         else:
             # in HPC
@@ -795,6 +806,7 @@ class plotter(object):
 
             ithbit_for_indexthCH = ch_65to72 + ch_73to80 + ch_81to88 + \
                 ch_89to96 + ch_97to104 + ch_105to112 + ch_113to120 + ch_121to128
+            # print("kc705_id == 2, ithbit_for_indexthCH:", ithbit_for_indexthCH)
 
         hitmap_mppc = hitmap_mppc[ithbit_for_indexthCH]
 
@@ -842,8 +854,16 @@ class plotter(object):
         ChVsDiffFromMrSync_MPPC = ChVsDiffFromMrSync_MPPC[:,
                                                           ithbit_for_indexthCH]
 
+        # make log scale colorbar
+        norm_pmttdcdiff = mcolors.SymLogNorm(
+            linthresh=1, vmin=0.02, vmax=ChVsDiffFromMrSync_PMT.max(), base=10)
+        # cmap_pmttdcdiff = plt.cm.viridis
+        cmap_pmttdcdiff = copy.copy(plt.cm.get_cmap("viridis"))
+        # entry 0 = white
+        cmap_pmttdcdiff.set_under('white')
+
         self.ax_tdcdiff_pmt.imshow(
-            ChVsDiffFromMrSync_PMT, cmap=cmap_chmap, aspect='auto', norm=norm_chmap, origin='upper', interpolation='kaiser')
+            ChVsDiffFromMrSync_PMT, cmap=cmap_pmttdcdiff, aspect='auto', norm=norm_pmttdcdiff, origin='upper', interpolation='hamming')
 
         # 横軸整数
         self.ax_tdcdiff_pmt.get_xaxis().set_major_locator(
@@ -866,8 +886,15 @@ class plotter(object):
             ChVsDiffFromMrSync_MPPC = np.hstack(
                 ([[0] for i in range(1200)], ChVsDiffFromMrSync_MPPC))
 
+        # make log scale colorbar
+        norm_mppctdcdiff = mcolors.SymLogNorm(
+            linthresh=1, vmin=0.02, vmax=ChVsDiffFromMrSync_MPPC.max(), base=10)
+        # cmap_mppctdcdiff = plt.cm.viridis
+        cmap_mppctdcdiff = copy.copy(plt.cm.get_cmap("viridis"))
+        # entry 0 = white
+        cmap_mppctdcdiff.set_under('white')
         self.ax_tdcdiff_mppc.imshow(
-            ChVsDiffFromMrSync_MPPC, cmap=cmap_chmap, aspect='auto', norm=norm_chmap, origin='upper', interpolation='kaiser')
+            ChVsDiffFromMrSync_MPPC, cmap=cmap_mppctdcdiff, aspect='auto', norm=norm_mppctdcdiff, origin='upper', interpolation='hamming')
 
         # 描画範囲x軸を整える(0-63->1-64)
         self.ax_tdcdiff_mppc.set_xlim(offset_mppc, 63 + offset_mppc)
