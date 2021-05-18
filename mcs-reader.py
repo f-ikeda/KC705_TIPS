@@ -63,6 +63,8 @@ def get_option():
         '-mt', '--mtplot', action='store_true', help='draw mt. plot (1 file/spillが前提、要注意)')
     argparser.add_argument(
         '-t', '--time', action='store_true', help='skip 8bytes timestamp after header')
+    argparser.add_argument('-gn', '--graphnewhod', action='store_true',
+                           help='draw graph with all newhod ch in a  spill(1 file/spillが前提、要注意)')
 
     return argparser.parse_args()
 
@@ -172,6 +174,55 @@ def plot_spill(data_with_a_spill):
         ax2.set_title('ch:' + str(args.channel))
         ax2.set_xlabel('ns')
         ax2.set_ylabel('Entries')
+
+    plt.show()
+    sys.exit()
+
+
+def plot_spill_newhod(data_with_a_spill, em_value):
+    data_with_a_spill = data_with_a_spill[0:66]  # NewHodOnly
+
+    fig = plt.figure(figsize=(8, 6))
+    plt.subplots_adjust(wspace=0.4, hspace=0.6)
+
+    ax1 = fig.add_subplot(2, 1, 1)
+
+    # make log scale colorbar
+    norm_hitmap = mcolors.SymLogNorm(
+        linthresh=1, vmin=0.8, vmax=data_with_a_spill.sum(axis=0).T.max(), base=10)
+    # エントリなければ色塗らない
+    cmap_hitmap = plt.cm.viridis
+    cmap_hitmap.set_under('white')
+
+    entiries = data_with_a_spill.sum(axis=0).T.sum()
+
+    # 転置して時間を横軸に
+    img_imshow = ax1.imshow(data_with_a_spill.sum(axis=0).T,
+                            cmap=cmap_hitmap, aspect='auto', origin='lower', norm=norm_hitmap, interpolation='none')
+    fig.colorbar(img_imshow, label='Entiries:' +
+                 str(entiries), orientation='vertical')
+    ax1.set_title('New Hod.(MPPC+PMT), E.M.: ' + str(em_value))
+    ax1.set_xlabel('CLK')
+    ax1.set_ylabel('bit-fields')
+
+    ax2 = fig.add_subplot(2, 1, 2)
+    x_range = data_with_a_spill.sum(axis=0).T.shape[1]
+    y = data_with_a_spill.sum(
+        axis=0).T.sum(axis=0)
+    entries = y.sum()
+    ax2.step(np.arange(x_range) * 5, y, where='post',
+             label='Entries:' + str(entries))
+    ax2.set_yscale('log')
+    ax2.set_ylim(0.1, y.max() * 10)
+
+    ax2.grid(axis="y")
+    ax2.minorticks_on()
+    ax2.grid(which="both", axis="x")
+
+    ax2.legend()
+    ax2.set_title('New Hod.(MPPC+PMT), E.M.: ' + str(em_value))
+    ax2.set_xlabel('ns')
+    ax2.set_ylabel('Entries')
 
     plt.show()
     sys.exit()
@@ -378,6 +429,9 @@ def main(path_to_file):
 
                     if args.mtplot:
                         prlot_mt(data_with_a_spill)
+
+                    if args.graphnewhod:
+                        plot_spill_newhod(data_with_a_spill, em_list[-1])
             else:
                 # データの場合
                 f.seek(-1 * bit.SIZE_HEADER, 1)
