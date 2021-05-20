@@ -618,9 +618,10 @@ class plotter(object):
         self.lines_p3 = self.ax_p3.hist(
             tdc_p3_wo_coinci*CLOCK_TIME*pow(10, -9),
             bins=250, histtype='step', log=True, label='wo coincidence', alpha=0.8, color='dodgerblue')
+        entries_wCoin = tdc_p3_w_coinci.sum()
         self.ax_p3.hist(
             tdc_p3_w_coinci*CLOCK_TIME*pow(10, -9),
-            bins=250, histtype='step', log=True, label='w/ coincidence', alpha=0.8, color='maroon')
+            bins=250, histtype='step', log=True, label='w/ coincidence\n' + 'Entries: ' + str(entries_wCoin), alpha=0.8, color='maroon')
         self.ax_p3.set_ylim(0.1,
                             self.lines_p3[0].max() * 10)
         # self.ax_p3.legend(loc='upper right')
