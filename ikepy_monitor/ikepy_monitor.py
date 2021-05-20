@@ -615,10 +615,11 @@ class plotter(object):
         self.ax_p3.set_xlabel('time from P3 [s]', loc='left')
         self.ax_p3.set_ylabel('events/bin')
         self.ax_p3.grid(True)
+        entries_woCoin = tdc_p3_wo_coinci.sum()  # コインシデンスとったやつのエントリー数
         self.lines_p3 = self.ax_p3.hist(
             tdc_p3_wo_coinci*CLOCK_TIME*pow(10, -9),
-            bins=250, histtype='step', log=True, label='wo coincidence', alpha=0.8, color='dodgerblue')
-        entries_wCoin = tdc_p3_w_coinci.sum()
+            bins=250, histtype='step', log=True, label='wo coincidence\n' + 'Entries: ' + str(entries_woCoin), alpha=0.8, color='dodgerblue')
+        entries_wCoin = tdc_p3_w_coinci.sum()  # コインシデンスとったやつのエントリー数
         self.ax_p3.hist(
             tdc_p3_w_coinci*CLOCK_TIME*pow(10, -9),
             bins=250, histtype='step', log=True, label='w/ coincidence\n' + 'Entries: ' + str(entries_wCoin), alpha=0.8, color='maroon')
