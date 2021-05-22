@@ -82,7 +82,7 @@ def coincidence_p3(tdc_foo, tdc_bar):
     # output: coincidenced array with width of 5 clocks
 
     # coincidence width, when n, -n, -n+1, ..., -1, 0, 1, ..., n-1, n
-    back_and_forth = 2
+    back_and_forth = 5
 
     tdc_coincidenced = np.empty_like(tdc_foo)
     size_foo = tdc_foo.size
@@ -113,7 +113,7 @@ def coincidence_mrsync(tuple_foo, tuple_bar):
     # output: coincidenced tuple (tdc and mrsync) with width of 5 clocks
 
     # coincidence width, when n, -n, -n+1, ..., -1, 0, 1, ..., n-1, n
-    back_and_forth = 2
+    back_and_forth = 5
 
     tdc_foo = tuple_foo[0]
     mrsync_foo = tuple_foo[1]
