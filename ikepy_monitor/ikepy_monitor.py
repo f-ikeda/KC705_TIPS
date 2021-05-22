@@ -1077,76 +1077,75 @@ def main(SOMECALCS, PLOTTER, file_path, content_type, kc705_id, save_flag, skip_
             = recursion(coincidence_mrsync, tuple([tuple([newhod-0, mrsync_newhod]),
                                                   tuple(
                                                       [bh1-DELAY_BH1_TO_NEWHOD, mrsync_bh1]),
-                                                       tuple(
-                                                           [tc1-DELAY_TC1_TO_NEWHOD, mrsync_tc1]),
-                                                            mrsync_oldhod])]))  # oldhodを外す。bh1のch = bh1&&bh2, tc1のch = tc1&&tc2
-        newhod_coincidenced_mrsync=tdc_coincidenced_tmp - mrsync_coincidenced_tmp
+                                                   tuple(
+                [tc1-DELAY_TC1_TO_NEWHOD, mrsync_tc1])]))  # oldhodを外す。bh1のch = bh1&&bh2, tc1のch = tc1&&tc2
+        newhod_coincidenced_mrsync = tdc_coincidenced_tmp - mrsync_coincidenced_tmp
 
         # -------- hitmap (mppc, pmt) --------
         heatmap_mppc_2d, heatmap_pmt_1d\
-            =SOMECALCS.get_hitmap(sig_mppc, sig_pmt, kc705_id)
+            = SOMECALCS.get_hitmap(sig_mppc, sig_pmt, kc705_id)
 
         # -------- hitmap (bit-filed) --------
         # number of hit to mppc, pmt and mrsync
-        hit_mppc=np.zeros(64, dtype= 'u8')
-        hit_pmt=np.zeros(12, dtype= 'u8')
-        hit_mrsync=np.zeros(1, dtype= 'u8')
+        hit_mppc = np.zeros(64, dtype='u8')
+        hit_pmt = np.zeros(12, dtype='u8')
+        hit_mrsync = np.zeros(1, dtype='u8')
 
-        hit_mppc=np.array(
+        hit_mppc = np.array(
             [np.count_nonzero((sig_mppc & (1 << bit_i)) != 0)
-                for bit_i in range(64)], dtype= 'u8')
-        hit_pmt=np.array(
+                for bit_i in range(64)], dtype='u8')
+        hit_pmt = np.array(
             [np.count_nonzero((sig_pmt & (1 << bit_i)) != 0)
-                for bit_i in range(12)], dtype= 'u8')
-        hit_mrsync=np.array(
+                for bit_i in range(12)], dtype='u8')
+        hit_mrsync = np.array(
             [np.count_nonzero((sig_mrsync & (1 << bit_i)) != 0)
-                for bit_i in range(1)], dtype= 'u8')
+                for bit_i in range(1)], dtype='u8')
 
-        hitmap_mr_and_pmt=np.empty(0, dtype= 'u8')
-        hitmap_mr_and_pmt=np.insert(
+        hitmap_mr_and_pmt = np.empty(0, dtype='u8')
+        hitmap_mr_and_pmt = np.insert(
             hitmap_mr_and_pmt, hitmap_mr_and_pmt.size, hit_mrsync)
-        hitmap_mr_and_pmt=np.insert(
+        hitmap_mr_and_pmt = np.insert(
             hitmap_mr_and_pmt, hitmap_mr_and_pmt.size, hit_pmt)
         # print('len(hitmap_mr_and_pmt):', len(hitmap_mr_and_pmt))
 
-        hitmap_mppc=np.empty(0, dtype= 'u8')
-        hitmap_mppc=np.insert(hitmap_mppc, hitmap_mppc.size, hit_mppc)
+        hitmap_mppc = np.empty(0, dtype='u8')
+        hitmap_mppc = np.insert(hitmap_mppc, hitmap_mppc.size, hit_mppc)
 
         ######## TDC Diff from MR Sync (PMT) ########
         # 6us(/5ns=1200)だから、MRSyncから1200CLKを見れば十分、オーバーフローもアンダーフローもないはず
-        clk_range=1200
-        diff_from_mrsync_map_pmt=np.zeros((clk_range, 12), dtype= 'u8')
-        diff_from_mrsync_map_pmt=np.ascontiguousarray(
+        clk_range = 1200
+        diff_from_mrsync_map_pmt = np.zeros((clk_range, 12), dtype='u8')
+        diff_from_mrsync_map_pmt = np.ascontiguousarray(
             diff_from_mrsync_map_pmt)
         # 0,..., 1198, 1199に収まらないとき
-        underflow_pmt=np.zeros(12, dtype= 'u8')
-        underflow_pmt=np.ascontiguousarray(underflow_pmt)
-        overflow_pmt=np.zeros(12, dtype= 'u8')
-        overflow_pmt=np.ascontiguousarray(overflow_pmt)
+        underflow_pmt = np.zeros(12, dtype='u8')
+        underflow_pmt = np.ascontiguousarray(underflow_pmt)
+        overflow_pmt = np.zeros(12, dtype='u8')
+        overflow_pmt = np.ascontiguousarray(overflow_pmt)
 
         if mrsync_pmt.size != 0:
-            diff_from_mrsync_map_pmt, underflow_pmt, overflow_pmt=get_diff_from_mrsync_map_pmt(
+            diff_from_mrsync_map_pmt, underflow_pmt, overflow_pmt = get_diff_from_mrsync_map_pmt(
                 0, 12, sig_pmt, tdc_pmt, mrsync_pmt, diff_from_mrsync_map_pmt, underflow_pmt, overflow_pmt)
 
         ######## TDC Diff from MR Sync (MPPC) ########
         # 6us(/5ns=1200)だから、MRSyncから1200CLKを見れば十分、オーバーフローもアンダーフローもないはず
-        clk_range=1200
-        diff_from_mrsync_map_mppc=np.zeros((clk_range, 64+12), dtype= 'u8')
-        diff_from_mrsync_map_mppc=np.ascontiguousarray(
+        clk_range = 1200
+        diff_from_mrsync_map_mppc = np.zeros((clk_range, 64+12), dtype='u8')
+        diff_from_mrsync_map_mppc = np.ascontiguousarray(
             diff_from_mrsync_map_mppc)
         # 0,..., 1198, 1199に収まらないとき
-        underflow_mppc=np.zeros(64, dtype= 'u8')
-        underflow_mppc=np.ascontiguousarray(underflow_mppc)
-        overflow_mppc=np.zeros(64, dtype= 'u8')
-        overflow_mppc=np.ascontiguousarray(overflow_mppc)
+        underflow_mppc = np.zeros(64, dtype='u8')
+        underflow_mppc = np.ascontiguousarray(underflow_mppc)
+        overflow_mppc = np.zeros(64, dtype='u8')
+        overflow_mppc = np.ascontiguousarray(overflow_mppc)
 
         if mrsync_mppc.size != 0:
-            diff_from_mrsync_map_mppc, underflow_mppc, overflow_mppc=get_diff_from_mrsync_map_mppc(
+            diff_from_mrsync_map_mppc, underflow_mppc, overflow_mppc = get_diff_from_mrsync_map_mppc(
                 0, 64, sig_mppc, tdc_mppc, mrsync_mppc, diff_from_mrsync_map_mppc, underflow_mppc, overflow_mppc)
         # print('np.count_nonzero(diff_from_mrsync_map_mppc):', np.count_nonzero(diff_from_mrsync_map_mppc))
         # print('diff_from_mrsync_map_mppc[0]: ', diff_from_mrsync_map_mppc[0])
 
-        T_END=time.time()
+        T_END = time.time()
         print('TIME [s] to caliculation: ' + str(T_END - T_START))
         ######## Drawing ########
         PLOTTER.reloader(newhod_coincidenced_mrsync, newhod-mrsync_newhod,
@@ -1161,33 +1160,33 @@ def main(SOMECALCS, PLOTTER, file_path, content_type, kc705_id, save_flag, skip_
 
 
 if __name__ == '__main__':
-    parser=get_option()
-    args=parser.parse_args()
+    parser = get_option()
+    args = parser.parse_args()
 
     if args.file is not None:
-        path_to_file=args.file
-        content_type='file'
+        path_to_file = args.file
+        content_type = 'file'
     elif args.dir is not None:
-        path_to_directory=args.dir
-        content_type='directory'
+        path_to_directory = args.dir
+        content_type = 'directory'
     else:
         parser.print_help()
         sys.exit()
 
     # 召喚
-    SOMECALCS=SomeCalcs()
+    SOMECALCS = SomeCalcs()
 
     # cモジュールをロード
-    c_library=SOMECALCS.set_loader()
+    c_library = SOMECALCS.set_loader()
     # 大きめに1024*5
-    buf=ctypes.create_string_buffer(1024*5)
+    buf = ctypes.create_string_buffer(1024*5)
 
     # 召喚
-    PLOTTER=plotter()
+    PLOTTER = plotter()
 
     if content_type == 'file':
-        buf.value=bytes(path_to_file, encoding= 'utf-8')
-        PLOTTER.file_name=path_to_file
+        buf.value = bytes(path_to_file, encoding='utf-8')
+        PLOTTER.file_name = path_to_file
         print("path_to_file:", path_to_file)
         main(SOMECALCS, PLOTTER, path_to_file,
              content_type, args.kc, args.save, args.timestamp)
@@ -1196,9 +1195,9 @@ if __name__ == '__main__':
             print('NO FILE ;-)')
             time.sleep(0.3)
 
-        path_to_file=PLOTTER.finder(path_to_directory)
-        buf.value=bytes(path_to_file, encoding= 'utf-8')
-        PLOTTER.file_name=path_to_file
+        path_to_file = PLOTTER.finder(path_to_directory)
+        buf.value = bytes(path_to_file, encoding='utf-8')
+        PLOTTER.file_name = path_to_file
 
         print("path_to_file:", path_to_file)
         main(SOMECALCS, PLOTTER, path_to_file,
