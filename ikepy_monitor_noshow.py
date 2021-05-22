@@ -913,7 +913,7 @@ class plotter(object):
             png_name = os.path.basename(self.file_name)
             self.fig.savefig(
                 "ikepy_fig/" + png_name.replace('.dat', '') + ".png")
-
+            print("saved!")
         '''
         if content_type == 'file':
             plt.show()
@@ -1194,15 +1194,24 @@ if __name__ == '__main__':
         print("path_to_file:", path_to_file)
         main(SOMECALCS, PLOTTER, path_to_file,
              content_type, args.kc, args.save, args.timestamp)
-    while (True):
+
+    if content_type == 'directory':
         while(len(PLOTTER.finder(path_to_directory)) == 0):
             print('NO FILE ;-)')
             time.sleep(0.3)
 
-        path_to_file = PLOTTER.finder(path_to_directory)
-        buf.value = bytes(path_to_file, encoding='utf-8')
-        PLOTTER.file_name = path_to_file
+        file_and_dir_names = os.listdir(path_to_directory)
+        files_names_dat = [f for f in file_and_dir_names
+                           if (os.path.isfile(os.path.join(path_to_directory, f)) and ('.dat' in f))]
 
-        print("path_to_file:", path_to_file)
-        main(SOMECALCS, PLOTTER, path_to_file,
-             content_type, args.kc, args.save, args.timestamp)
+        # path_to_file = PLOTTER.finder(path_to_directory)
+        for file_i in files_names_dat:
+            path_to_file = os.path.join(path_to_directory, file_i)
+            buf.value = bytes(path_to_file, encoding='utf-8')
+            PLOTTER.file_name = path_to_file
+
+            print("path_to_file:", path_to_file)
+            main(SOMECALCS, PLOTTER, path_to_file,
+                 content_type, args.kc, args.save, args.timestamp)
+
+    print("finished!")
